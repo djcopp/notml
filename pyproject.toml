@@ -1,7 +1,7 @@
 [project]
 name = "notml"
 version = "0.2.0"
-description = "Regular expressions and other ordinary programs compiled to ONNX, so they run on any GPU, including WebGPU in a browser."
+description = "Ordinary programs compiled to ONNX: a CHIP-8 computer, simulations and a regex compiler that run in the browser."
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Devon Copp" }]

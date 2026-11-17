@@ -3,15 +3,52 @@
 [![CI](https://github.com/djcopp/notml/actions/workflows/ci.yml/badge.svg)](https://github.com/djcopp/notml/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Simulations written as ONNX graphs and run in the browser by onnxruntime-web. Each one is a few kilobytes
-of ONNX, built in Python, and steps a world of up to four million cells on WebAssembly or WebGPU. The page
-also runs the same rules written in plain JavaScript, and shows a table of what it measured on your device.
+Ordinary programs compiled into ONNX graphs and run in the browser by onnxruntime-web: a complete CHIP-8
+computer, and a gallery of simulations. No machine learning is involved; ONNX is used as a portable
+program format.
+
+## A CHIP-8 computer inside an ONNX file
+
+**[Play it in your browser](https://djcopp.github.io/notml/chip8.html)**
+
+![64 CHIP-8 consoles, each running its own game of Catch, stepped by one ONNX model call](docs/img/chip8.png)
+
+`notml.chip8` builds a CHIP-8 (the 1970s virtual machine behind many early hobby games) as one 200 KB ONNX
+graph with no control flow. The CPU, 4 KB of memory, registers, stack, timers and the 64 × 32 screen are
+all tensors, and each model call runs a frame of instructions for every console in a batch. The page plays
+one console with the keyboard, loads any `.ch8` ROM you give it, or runs up to 1,024 consoles at once.
+
+How it works:
+
+- **No branches.** Each cycle fetches and decodes the instruction, computes what every one of the 35
+  instructions would do, and keeps the result that applies with `Where`.
+- **No bitwise ops.** AND, OR, XOR and shifts are built from division and remainder on bits, because
+  onnxruntime-web's WebGPU backend has no bitwise kernels.
+- **Drawing.** A sprite only touches a 15 × 8 patch, so the graph computes that patch and scatters it into
+  the screen, sending clipped pixels to a spare cell.
+- **Tested.** A plain Python emulator runs the same programs, and the tests require identical memory,
+  registers, stack, timers and screen after every frame, on hundreds of thousands of random instructions.
+- **Programs.** `notml.chip8.asm` is a small assembler. The bundled game, Catch, is written with it.
+
+In the browser (WASM, Apple M5) one console runs at the intended 60 frames per second, 256 consoles still
+run at 60, and 1,024 run at about 18, which is about 220,000 instructions per second in total. That is
+slow next to a conventional emulator; even the Python reference is faster per console. A graph can't
+modify a tensor in place, so every cycle produces a new copy of memory and screen, and every instruction
+pays for all the others. WebGPU is worse still: a frame is about 3,000 small operations, and the fixed
+cost of each GPU dispatch makes a call take around two seconds. The point is that a whole computer fits
+in a model file and runs anywhere onnxruntime does, many copies at a time.
+
+## Simulations
 
 **[Open the gallery](https://djcopp.github.io/notml/)**
 
+Four simulations, each a few kilobytes of ONNX, stepping worlds of up to four million cells on WebAssembly
+or WebGPU. The page also runs the same rules written in plain JavaScript and shows a table of what it
+measured on your device.
+
 ![Lenia, Gray–Scott reaction–diffusion, the Game of Life and Particle Life, as rendered by the gallery](docs/img/gallery.png)
 
-## How fast is it?
+### How fast are they?
 
 It depends on the simulation, the engine and the device, so the page measures it for you. In my runs (Chromium,
 Apple M5), the pattern was consistent even though the exact numbers moved a lot between runs:
@@ -41,6 +78,11 @@ from notml import sims
 
 onnx.save(sims.lenia(512, 512, steps=4), "lenia.onnx")  # input "world": float32 [1, 1, 512, 512] in [0, 1]
 onnx.save(sims.life(2048, 2048, steps=32), "life.onnx")  # input "cells": float32 [1, 1, 2048, 2048], 0 or 1
+
+from notml import chip8
+
+onnx.save(chip8.machine.build(cycles=12), "chip8.onnx")  # 12 instructions per call, any batch size
+state = chip8.machine.initial_state([chip8.program("catch")] * 100)  # 100 consoles; or load your own ROM bytes
 ```
 
 Each model takes the current state and returns it advanced by `steps`, plus a `uint8` image ready to draw,

@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CHIP-8 in ONNX</title>
+<meta name="description" content="A CHIP-8 computer compiled into one ONNX file, running in your browser.">
+<link rel="icon" href="data:,">
+<script src="isolate.js"></script>
+<style>
+  :root { --bg: #0f1011; --surface: #17181a; --ink: #ecebe8; --muted: #9c998f; --line: #2a2b2e; --accent: #3987e5; --lit: #f2c14e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 ui-sans-serif, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 36px 16px 56px; }
+  h1 { font-size: 28px; line-height: 1.2; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .lead { color: var(--muted); margin: 0 0 20px; max-width: 680px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 14px; }
+  .group { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+  .group button { font: inherit; font-size: 14px; padding: 8px 14px; border: 0; background: var(--surface); color: var(--ink);
+    cursor: pointer; border-right: 1px solid var(--line); }
+  .group button:last-child { border-right: 0; }
+  .group button:hover { background: var(--line); }
+  .group button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+  label.button { font-size: 14px; padding: 8px 14px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; }
+  label.button:hover { border-color: var(--accent); }
+  input[type=file] { display: none; }
+  .stage { background: #000; border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+  canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-top: 16px; }
+  .stat { border-top: 1px solid var(--line); padding-top: 10px; }
+  .stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 13px; }
+  .about { color: var(--muted); font-size: 14px; margin-top: 18px; max-width: 780px; }
+  kbd { font-family: ui-monospace, Menlo, monospace; font-size: 12px; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>A CHIP-8 computer inside an ONNX file</h1>
+  <p class="lead">The whole machine (CPU, 4 KB of memory, registers, stack, timers and a 64 × 32 screen) is one
+    200 KB ONNX graph with no control flow. Each call runs a frame of instructions for every console in a
+    batch. Play one, or run a thousand at once.</p>
+
+  <div class="bar">
+    <div class="group" id="modes" role="group" aria-label="Consoles">
+      <button data-n="1">Play one</button>
+      <button data-n="64">64 consoles</button>
+      <button data-n="256">256</button>
+      <button data-n="1024">1,024</button>
+    </div>
+    <label class="button">Load a .ch8 ROM<input type="file" id="rom" accept=".ch8,.rom,application/octet-stream"></label>
+  </div>
+
+  <div class="stage"><canvas id="screen" width="64" height="32" aria-label="CHIP-8 screen"></canvas></div>
+
+  <div class="stats">
+    <div class="stat"><b id="consoles">–</b><span>consoles</span></div>
+    <div class="stat"><b id="ips">–</b><span>instructions per second, all consoles</span></div>
+    <div class="stat"><b id="fps">–</b><span>frames per second (target 60)</span></div>
+    <div class="stat"><b id="call">–</b><span>time per model call</span></div>
+  </div>
+
+  <p class="about" id="help"></p>
+  <p class="about">Every instruction is decoded and executed with tensor operations: the graph computes what
+    each instruction would do and keeps the one that applies. Bitwise operations are built from division and
+    remainder, since WebGPU in onnxruntime-web has no bitwise kernels. The Python package that builds it is
+    tested against a conventional emulator on hundreds of thousands of random instructions.
+    Source: <a href="https://github.com/djcopp/notml">github.com/djcopp/notml</a> ·
+    <a href="./">simulation gallery</a></p>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/ort.webgpu.min.js"></script>
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const meta = (await (await fetch("models/meta.json")).json()).chip8;
+const CYCLES = meta.cycles;
+const n = Number(params.get("n") || 1);
+// WASM only: a call is about 3,000 small operations, and WebGPU's fixed cost per dispatch makes each call
+// take around two seconds however many consoles there are.
+const engine = "wasm";
+ort.env.wasm.numThreads = self.crossOriginIsolated ? navigator.hardwareConcurrency : 1;
+
+for (const b of document.querySelectorAll("#modes button")) {
+  b.setAttribute("aria-pressed", Number(b.dataset.n) === n);
+  b.onclick = () => { location.search = new URLSearchParams({ n: b.dataset.n }).toString(); };
+}
+$("help").innerHTML = n === 1
+  ? "Catch: hold <kbd>Q</kbd> or <kbd>←</kbd> to move left and <kbd>E</kbd> or <kbd>→</kbd> to move right. The CHIP-8 keypad is mapped to <kbd>1</kbd>–<kbd>4</kbd>, <kbd>Q</kbd>–<kbd>R</kbd>, <kbd>A</kbd>–<kbd>F</kbd> and <kbd>Z</kbd>–<kbd>V</kbd>, so most ROMs you load will play."
+  : `${n.toLocaleString()} consoles, each running its own game of Catch with random key presses. One model call steps all of them.`;
+
+// ---- consoles ----
+let rom = new Uint8Array(await (await fetch("models/catch.ch8")).arrayBuffer());
+
+function fresh(rom) {
+  const mem = new Int32Array(n * 4096), ctl = new Int32Array(n * 6);
+  for (let b = 0; b < n; b++) {
+    mem.set(meta.font, b * 4096);
+    mem.set(rom, b * 4096 + 0x200);
+    ctl[b * 6] = 0x200;            // PC
+    ctl[b * 6 + 5] = b + 1;        // random seed
+  }
+  const t = (data, w) => new ort.Tensor("int32", data, [n, w]);
+  return { mem: t(mem, 4096), v: t(new Int32Array(n * 16), 16), ctl: t(ctl, 6),
+           stack: t(new Int32Array(n * 16), 16), screen: t(new Int32Array(n * 2048), 2048) };
+}
+
+// ---- keyboard (one console) and random players (many) ----
+const KEYMAP = { "1": 1, "2": 2, "3": 3, "4": 12, q: 4, w: 5, e: 6, r: 13, a: 7, s: 8, d: 9, f: 14, z: 10, x: 0, c: 11, v: 15,
+                 arrowleft: 4, arrowright: 6, arrowup: 5, arrowdown: 8 };
+const keys = new Int32Array(n * 16);
+if (n === 1) {
+  const set = (e, down) => { const k = KEYMAP[e.key.toLowerCase()]; if (k !== undefined) { keys[k] = down ? 1 : 0; e.preventDefault(); } };
+  addEventListener("keydown", (e) => set(e, true));
+  addEventListener("keyup", (e) => set(e, false));
+}
+function randomPlayers() {
+  for (let b = 0; b < n; b++) {
+    if (Math.random() < 0.04) {  // change what this console holds now and then
+      keys[b * 16 + 4] = 0; keys[b * 16 + 6] = 0;
+      const pick = Math.floor(Math.random() * 3);
+      if (pick === 1) keys[b * 16 + 4] = 1;
+      if (pick === 2) keys[b * 16 + 6] = 1;
+    }
+  }
+}
+
+// ---- drawing: tile every console's 64 x 32 screen into one image ----
+const canvas = $("screen"), ctx = canvas.getContext("2d");
+const cols = Math.ceil(Math.sqrt(n / 2)) * 1, rows = Math.ceil(n / cols);
+const gap = n === 1 ? 0 : 2;
+canvas.width = cols * (64 + gap) - gap; canvas.height = rows * (32 + gap) - gap;
+const img = ctx.createImageData(canvas.width, canvas.height);
+const LIT = [242, 193, 78], DARK = [12, 12, 12];
+function draw(pixels) {
+  const d = img.data, W = canvas.width;
+  d.fill(0);
+  for (let b = 0; b < n; b++) {
+    const ox = (b % cols) * (64 + gap), oy = Math.floor(b / cols) * (32 + gap);
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 64; x++) {
+      const c = pixels[b * 2048 + y * 64 + x] ? LIT : DARK, i = ((oy + y) * W + ox + x) * 4;
+      d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2]; d[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+// ---- sound: a square wave while console 0's sound timer is running ----
+let audio, osc;
+function beep(on) {
+  if (on && !osc) {
+    audio ??= new AudioContext();
+    osc = audio.createOscillator(); osc.type = "square"; osc.frequency.value = 440;
+    const gain = audio.createGain(); gain.gain.value = 0.05; osc.connect(gain).connect(audio.destination); osc.start();
+  } else if (!on && osc) { osc.stop(); osc = null; }
+}
+
+// ---- main loop ----
+const opts = { executionProviders: [engine] };
+const session = await ort.InferenceSession.create("models/chip8.onnx", opts);
+let state = fresh(rom), frames = 0, calls = 0, callMs = 0, last = performance.now(), token = 0;
+$("consoles").textContent = n.toLocaleString();
+
+$("rom").onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  rom = new Uint8Array(await file.arrayBuffer()).slice(0, 4096 - 0x200);
+  state = fresh(rom);
+};
+
+async function frame() {
+  const mine = ++token;
+  if (n > 1) randomPlayers();
+  const t0 = performance.now();
+  const out = await session.run({ ...state, keys: new ort.Tensor("int32", keys, [n, 16]) });
+  callMs += performance.now() - t0; calls += 1;
+  for (const name of ["mem", "v", "stack", "screen"]) {
+    const old = state[name];
+    state[name] = out[`${name}_out`];
+    if (old.location === "gpu-buffer") old.dispose();
+  }
+  state.ctl = out.ctl_out;
+  if (n === 1) beep(out.ctl_out.data[4] > 0);
+  draw(out.image.data);
+  frames += 1;
+  const now = performance.now();
+  if (now - last > 1000) {
+    const sec = (now - last) / 1000;
+    $("fps").textContent = (frames / sec).toFixed(0);
+    $("ips").textContent = Math.round(frames * CYCLES * n / sec).toLocaleString();
+    $("call").textContent = `${(callMs / calls).toFixed(1)} ms`;
+    window.benchLast = { n, engine, fps: frames / sec, ips: frames * CYCLES * n / sec, call_ms: callMs / calls };
+    frames = 0; calls = 0; callMs = 0; last = now;
+  }
+  if (mine === token) requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

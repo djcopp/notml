@@ -23,6 +23,8 @@ SIMS = {
     },
 }
 
+CHIP8_CYCLES = 12  # instructions per 60 Hz frame: 720 a second, close to the original hardware
+
 if __name__ == "__main__":
     out = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "gallery/models")
     out.mkdir(parents=True, exist_ok=True)
@@ -34,4 +36,11 @@ if __name__ == "__main__":
             "bytes": (out / f"{name}.onnx").stat().st_size
         }
         print(f"{name}: {meta[name]}")
+    from notml import chip8
+    from notml.chip8.reference import FONT
+
+    onnx.save(chip8.machine.build(CHIP8_CYCLES), out / "chip8.onnx")
+    (out / "catch.ch8").write_bytes(chip8.program("catch"))
+    meta["chip8"] = {"cycles": CHIP8_CYCLES, "font": FONT, "bytes": (out / "chip8.onnx").stat().st_size}
+    print(f"chip8: {meta['chip8']['bytes']} bytes")
     (out / "meta.json").write_text(json.dumps(meta, indent=1))

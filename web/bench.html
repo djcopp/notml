@@ -35,9 +35,10 @@ const ORT_VERSION = params.get("ort") || "1.30.0";
 const ONLY = params.get("only")?.split(",");
 const BACKENDS = (params.get("backends") || "webgpu,wasm").split(",");
 const REPS = Number(params.get("reps") || 7);
-const ARRAYS = { int32: Int32Array, uint32: Uint32Array, float32: Float32Array, int64: BigInt64Array, bool: Uint8Array };
+const ONLY_ONNX = params.get("baseline") === "0";
+const ARRAYS = { int32: Int32Array, uint32: Uint32Array, uint8: Uint8Array, float32: Float32Array, int64: BigInt64Array, bool: Uint8Array };
 
-const log = (s) => { document.getElementById("log").textContent += s + "\n"; };
+const log = (s) => { document.getElementById("log").textContent += s + "\n"; console.log(`[bench] ${s}`); };
 
 function loadScript(src) {
   return new Promise((resolve, reject) => {
@@ -108,6 +109,33 @@ async function runCase(name, spec, backend, feeds, ref) {
   return { ms: times[Math.floor(times.length / 2)], ok };
 }
 
+// The browser's own regex engine on the same strings, decoded from the packed input once, untimed.
+const decoded = new Map();
+function runRegExp(spec, feeds, ref) {
+  const input = feeds[spec.inputs[0].name];
+  let strings = decoded.get(input);
+  if (!strings) {
+    const bytes = new Uint8Array(input.data.buffer, input.data.byteOffset, input.data.byteLength);
+    const width = spec.inputs[0].shape[1] * input.data.BYTES_PER_ELEMENT;
+    strings = [];
+    for (let i = 0; i < input.dims[0]; i++) {
+      let end = i * width;
+      while (end < (i + 1) * width && bytes[end] !== 0) end++;
+      strings.push(String.fromCharCode.apply(null, bytes.subarray(i * width, end)));
+    }
+    decoded.set(input, strings);
+  }
+  const re = new RegExp(spec.js_regexp);
+  const out = new Uint8Array(strings.length);
+  const once = () => { for (let i = 0; i < strings.length; i++) out[i] = re.test(strings[i]) ? 1 : 0; };
+  once(); once();
+  const times = [];
+  for (let r = 0; r < REPS; r++) { const t = performance.now(); once(); times.push(performance.now() - t); }
+  times.sort((x, y) => x - y);
+  const ok = out.every((v, i) => v === Number(ref.data[i]));
+  return { ms: times[Math.floor(times.length / 2)], ok };
+}
+
 (async () => {
   await loadScript(`https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/ort.webgpu.min.js`);
   if (params.get("verbose")) { ort.env.logLevel = "verbose"; ort.env.debug = true; }
@@ -129,16 +157,22 @@ async function runCase(name, spec, backend, feeds, ref) {
     const feeds = {};
     for (const input of spec.inputs) feeds[input.name] = await loadTensor(name, input);
     const ref = await loadTensor(name, spec.ref);
+    if (spec.js_regexp && !ONLY_ONNX) {
+      const { ms, ok } = runRegExp(spec, feeds, ref);
+      addRow([name, spec.size, "js RegExp", ms.toFixed(2), ok ? "correct" : "wrong", ""], ok);
+      log(`${name} regexp ${ms.toFixed(2)} ms ${ok ? "ok" : "WRONG"}`);
+      results.push({ case: name, backend: "regexp", ms, correct: ok });
+    }
     for (const backend of BACKENDS) {
       try {
         const { ms, ok } = await runCase(name, spec, backend, feeds, ref);
         addRow([name, spec.size, backend, ms.toFixed(2), ok ? "correct" : "wrong", ""], ok);
+        log(`${name} ${backend} ${ms.toFixed(2)} ms ${ok ? "ok" : "WRONG"}`);
         results.push({ case: name, backend, ms, correct: ok });
       } catch (e) {
         addRow([name, spec.size, backend, "", "error", String(e).slice(0, 140)], false);
         results.push({ case: name, backend, error: String(e).slice(0, 300) });
       }
-      log(`${name} ${backend} done`);
     }
   }
   window.benchResults = { env, results };

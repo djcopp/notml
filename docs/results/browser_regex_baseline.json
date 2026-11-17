@@ -1,0 +1,84 @@
+{
+ "env": {
+  "ort": "1.30.0",
+  "webgpu": "apple",
+  "threads": 10,
+  "isolated": true,
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/141.0.0.0 Safari/537.36"
+ },
+ "results": [
+  {
+   "case": "regex_email_stride1",
+   "backend": "regexp",
+   "ms": 31.29500000178814,
+   "correct": true
+  },
+  {
+   "case": "regex_email_stride1",
+   "backend": "webgpu",
+   "ms": 38.269999995827675,
+   "correct": true
+  },
+  {
+   "case": "regex_email_stride1",
+   "backend": "wasm",
+   "ms": 201.44499999284744,
+   "correct": true
+  },
+  {
+   "case": "regex_timestamp_stride1",
+   "backend": "regexp",
+   "ms": 23.62999999523163,
+   "correct": true
+  },
+  {
+   "case": "regex_timestamp_stride1",
+   "backend": "webgpu",
+   "ms": 36.69999998807907,
+   "correct": true
+  },
+  {
+   "case": "regex_timestamp_stride1",
+   "backend": "wasm",
+   "ms": 204.35999999940395,
+   "correct": true
+  },
+  {
+   "case": "regex_uuid_stride1",
+   "backend": "regexp",
+   "ms": 88.36499999463558,
+   "correct": true
+  },
+  {
+   "case": "regex_uuid_stride1",
+   "backend": "webgpu",
+   "ms": 85.15000000596046,
+   "correct": true
+  },
+  {
+   "case": "regex_uuid_stride1",
+   "backend": "wasm",
+   "ms": 429.40000000596046,
+   "correct": true
+  },
+  {
+   "case": "regex_loglines_stride4",
+   "backend": "regexp",
+   "ms": 6.795000001788139,
+   "correct": true
+  },
+  {
+   "case": "regex_loglines_stride4",
+   "backend": "webgpu",
+   "ms": 8.900000005960464,
+   "correct": true
+  },
+  {
+   "case": "regex_loglines_stride4",
+   "backend": "wasm",
+   "ms": 49.605000004172325,
+   "correct": true
+  }
+ ],
+ "ts": 1794895101.2837691
+}

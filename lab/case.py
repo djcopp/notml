@@ -59,6 +59,7 @@ class Case:
     size: str
     loop: Loop | None = None
     known_bad: str | None = None  # kept on purpose as a negative result; tests skip it
+    js_regexp: str | None = None  # the browser bench also times this JavaScript RegExp on the same strings
 
     @property
     def reference(self) -> Callable[..., np.ndarray]:

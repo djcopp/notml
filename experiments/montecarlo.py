@@ -19,7 +19,7 @@ import torch
 from onnx import TensorProto
 
 from lab.case import Case, Tolerance
-from lab.graph import Graph
+from notml.graph import Graph
 
 S0, STRIKE, RATE, SIGMA, TENOR = 100.0, 100.0, 0.03, 0.25, 1.0
 

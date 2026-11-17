@@ -41,6 +41,7 @@ def export(cases: list[Case], out: pathlib.Path = WEB) -> None:
             "ref": {"dtype": _dtype(ref), "shape": list(ref.shape), "file": "ref.bin"},
             "tolerance": dataclasses.asdict(case.tolerance),
             "loop": dataclasses.asdict(case.loop) if case.loop else None,
+            "js_regexp": case.js_regexp,
         }
         mb = sum((folder / i["file"]).stat().st_size for i in inputs) / 1e6
         print(f"exported {case.name} ({mb:.1f} MB of inputs)")

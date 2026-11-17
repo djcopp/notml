@@ -4,7 +4,7 @@ import importlib
 
 from lab.case import Case
 
-NAMES = ["nbody", "groupby", "montecarlo", "regex_dfa", "graphs", "levenshtein", "vm"]
+NAMES = ["regex", "nbody", "groupby", "montecarlo", "regex_dfa", "graphs", "levenshtein", "vm"]
 
 
 def load(name: str, small: bool = False) -> list[Case]:

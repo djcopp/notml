@@ -216,6 +216,15 @@ wheels = [
 ]
 
 [[package]]
+name = "interegular"
+version = "0.3.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/dc/9d/8b6dde58a028a3962ce17e84d5fe73758df61378e00ef8ac3d85da34b0ff/interegular-0.3.3.tar.gz", hash = "sha256:d9b697b21b34884711399ba0f0376914b81899ce670032486d0d048344a76600", size = 24705, upload-time = "2024-01-06T23:01:22.372Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c4/01/72d6472f80651673716d1deda2a5bbb633e563ecf94f4479da5519d69d25/interegular-0.3.3-py37-none-any.whl", hash = "sha256:b0c07007d48c89d6d19f7204972d369b2a77222722e126b6aa63aa721dc3b19c", size = 23635, upload-time = "2024-01-06T23:01:20.829Z" },
+]
+
+[[package]]
 name = "jinja2"
 version = "3.1.6"
 source = { registry = "https://pypi.org/simple" }
@@ -401,45 +410,74 @@ wheels = [
 
 [[package]]
 name = "notml"
-version = "0.1.0"
-source = { virtual = "." }
+version = "0.2.0"
+source = { editable = "." }
 dependencies = [
-    { name = "duckdb" },
+    { name = "interegular" },
     { name = "numpy" },
     { name = "onnx" },
+]
+
+[package.optional-dependencies]
+runtime = [
+    { name = "onnxruntime" },
+]
+
+[package.dev-dependencies]
+bench = [
+    { name = "duckdb" },
     { name = "onnxruntime" },
     { name = "onnxscript" },
     { name = "pandas" },
+    { name = "playwright" },
     { name = "rapidfuzz" },
     { name = "scipy" },
     { name = "torch" },
 ]
-
-[package.dev-dependencies]
 dev = [
+    { name = "duckdb" },
+    { name = "onnxruntime" },
+    { name = "onnxscript" },
+    { name = "pandas" },
     { name = "playwright" },
     { name = "pytest" },
+    { name = "rapidfuzz" },
     { name = "ruff" },
+    { name = "scipy" },
+    { name = "torch" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "interegular", specifier = ">=0.3.3" },
+    { name = "numpy", specifier = ">=1.26" },
+    { name = "onnx", specifier = ">=1.15" },
+    { name = "onnxruntime", marker = "extra == 'runtime'", specifier = ">=1.17" },
+]
+provides-extras = ["runtime"]
+
+[package.metadata.requires-dev]
+bench = [
     { name = "duckdb", specifier = ">=2.0.0" },
-    { name = "numpy", specifier = ">=2.5.5" },
-    { name = "onnx", specifier = ">=1.23.2" },
     { name = "onnxruntime", specifier = ">=1.32.0" },
     { name = "onnxscript", specifier = ">=0.7.2" },
     { name = "pandas", specifier = ">=3.1.1" },
+    { name = "playwright", specifier = ">=1.65.2" },
     { name = "rapidfuzz", specifier = ">=3.14.6" },
     { name = "scipy", specifier = ">=1.18.1" },
     { name = "torch", specifier = ">=2.15.0" },
 ]
-
-[package.metadata.requires-dev]
 dev = [
+    { name = "duckdb", specifier = ">=2.0.0" },
+    { name = "onnxruntime", specifier = ">=1.32.0" },
+    { name = "onnxscript", specifier = ">=0.7.2" },
+    { name = "pandas", specifier = ">=3.1.1" },
     { name = "playwright", specifier = ">=1.65.2" },
     { name = "pytest", specifier = ">=9.2.0" },
+    { name = "rapidfuzz", specifier = ">=3.14.6" },
     { name = "ruff", specifier = ">=0.17.5" },
+    { name = "scipy", specifier = ">=1.18.1" },
+    { name = "torch", specifier = ">=2.15.0" },
 ]
 
 [[package]]

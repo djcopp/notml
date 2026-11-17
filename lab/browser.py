@@ -32,6 +32,7 @@ def run(ort_version: str = "1.30.0", only: list[str] | None = None, reps: int = 
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=_executable(), headless=True, args=CHROMIUM_FLAGS)
         page = browser.new_page()
+        page.on("console", lambda m: m.text.startswith("[bench]") and print(" ", m.text[8:], flush=True))
         page.goto(url)
         page.wait_for_function("window.benchResults !== undefined", timeout=timeout_s * 1000, polling=1000)
         report = page.evaluate("window.benchResults")

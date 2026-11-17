@@ -21,7 +21,7 @@ import onnxruntime as ort
 import torch
 
 from lab.case import Case
-from lab.graph import IR_VERSION
+from notml.graph import IR_VERSION
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 BUILD = ROOT / "build"

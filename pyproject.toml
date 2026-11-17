@@ -1,25 +1,39 @@
 [project]
 name = "notml"
-version = "0.1.0"
-description = "Non-ML workloads as portable ONNX graphs, benchmarked natively and in the browser."
+version = "0.2.0"
+description = "Regular expressions and other ordinary programs compiled to ONNX, so they run on any GPU, including WebGPU in a browser."
 readme = "README.md"
 license = "MIT"
+authors = [{ name = "Devon Copp" }]
 requires-python = ">=3.12"
+keywords = ["onnx", "webgpu", "regex", "dfa", "gpu", "onnxruntime"]
 dependencies = [
+    "interegular>=0.3.3",
+    "numpy>=1.26",
+    "onnx>=1.15",
+]
+
+[project.optional-dependencies]
+runtime = ["onnxruntime>=1.17"]
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+# what the benchmarks and experiments race against
+bench = [
     "duckdb>=2.0.0",
-    "numpy>=2.5.5",
-    "onnx>=1.23.2",
     "onnxruntime>=1.32.0",
     "onnxscript>=0.7.2",
     "pandas>=3.1.1",
+    "playwright>=1.65.2",
     "rapidfuzz>=3.14.6",
     "scipy>=1.18.1",
     "torch>=2.15.0",
 ]
-
-[dependency-groups]
 dev = [
-    "playwright>=1.65.2",
+    { include-group = "bench" },
     "pytest>=9.2.0",
     "ruff>=0.17.5",
 ]

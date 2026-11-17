@@ -47,7 +47,11 @@ function loadOrt(v) {
 (async () => {
   const ORT_VERSION = params.get("ort") || "1.22.0";
   await loadOrt(ORT_VERSION);
-  if (params.get("verbose")) { ort.env.logLevel = "verbose"; ort.env.debug = true; }
+  if (params.get("verbose")) {
+    window.__logs = [];
+    for (const k of ["log", "info", "warn", "debug", "error"]) { const orig = console[k].bind(console); console[k] = (...a) => { window.__logs.push(a.map(String).join(" ")); orig(...a); }; }
+    ort.env.logLevel = "verbose"; ort.env.debug = true;
+  }
   document.getElementById("env").textContent = `onnxruntime-web ${ORT_VERSION} · WebGPU: ${"gpu" in navigator ? "available" : "NOT available"} · threads: ${navigator.hardwareConcurrency}`;
   ort.env.wasm.numThreads = navigator.hardwareConcurrency;
   const manifest = await (await fetch("manifest.json")).json();
@@ -58,12 +62,25 @@ function loadOrt(v) {
     const ref = await load(name, m.ref);
     for (const be of backends) {
       try {
-        const sess = await ort.InferenceSession.create(`${name}/model.onnx`, { executionProviders: [be], graphOptimizationLevel: "all" });
-        let out = (await sess.run(feeds))[sess.outputNames[0]];
+        const opts = { executionProviders: [be], graphOptimizationLevel: "all" };
+        if (m.loop && be === "webgpu") opts.preferredOutputLocation = "gpu-buffer";   // keep state on the GPU between calls
+        const sess = await ort.InferenceSession.create(`${name}/model.onnx`, opts);
+        // loop mode: call the model `calls` times, feeding outputs back as inputs (e.g. VM cycles, sim steps)
+        const runOnce = async () => {
+          if (!m.loop) return (await sess.run(feeds))[sess.outputNames[0]];
+          let f = { ...feeds }, o;
+          for (let k = 0; k < m.loop.calls; k++) {
+            o = await sess.run(f);
+            f = { ...f }; for (const [inName, outIdx] of Object.entries(m.loop.feedback)) f[inName] = o[sess.outputNames[outIdx]];
+          }
+          const first = o[sess.outputNames[0]];
+          return first.location === "gpu-buffer" ? new ort.Tensor(first.type, await first.getData(), first.dims) : first;
+        };
+        let out = await runOnce();
         const ok = check(out, ref, m);
-        for (let w = 0; w < 1; w++) await sess.run(feeds);
+        await runOnce();
         const times = [];
-        for (let r = 0; r < REPS; r++) { const t = performance.now(); out = (await sess.run(feeds))[sess.outputNames[0]]; times.push(performance.now() - t); }
+        for (let r = 0; r < REPS; r++) { const t = performance.now(); out = await runOnce(); times.push(performance.now() - t); }
         times.sort((a, b) => a - b); const ms = times[Math.floor(times.length / 2)];
         row([name, m.size, be, ms.toFixed(2), ok ? "ok" : "MISMATCH", ""], ok ? "ok" : "bad");
         results.push({ name, backend: be, ms, ok });

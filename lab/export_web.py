@@ -42,7 +42,7 @@ def main():
         entry = entry or "main"
         captured = []
         mod = importlib.import_module(f"experiments.{exp}")
-        mod.run_experiment = lambda *a, **k: captured.append((a, k))
+        mod.run_experiment = lambda *a, _c=captured, **k: _c.append((a, k))
         getattr(mod, entry)()
         for args, kw in captured:
             name, module, inputs, names = args[:4]
@@ -57,21 +57,25 @@ def main():
                 x = np.ascontiguousarray(x)
                 x.tofile(d / f"in_{i}.bin")
                 ins.append(
-                    dict(
-                        name=n,
-                        dtype=DT[x.dtype],
-                        shape=list(x.shape),
-                        file=f"in_{i}.bin",
-                    )
+                    {
+                        "name": n,
+                        "dtype": DT[x.dtype],
+                        "shape": list(x.shape),
+                        "file": f"in_{i}.bin",
+                    }
                 )
             ref.tofile(d / "ref.bin")
-            manifest[name] = dict(
-                inputs=ins,
-                ref=dict(dtype=DT[ref.dtype], shape=list(ref.shape), file="ref.bin"),
-                size=kw.get("size_note", ""),
-                stochastic=name.startswith("montecarlo"),
-                rel_to_max=name.startswith("nbody"),
-            )
+            manifest[name] = {
+                "inputs": ins,
+                "ref": {
+                    "dtype": DT[ref.dtype],
+                    "shape": list(ref.shape),
+                    "file": "ref.bin",
+                },
+                "size": kw.get("size_note", ""),
+                "stochastic": name.startswith("montecarlo"),
+                "rel_to_max": name.startswith("nbody"),
+            }
             print(
                 f"exported {name}: {sum((d / i['file']).stat().st_size for i in ins) / 1e6:.1f} MB inputs"
             )

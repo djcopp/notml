@@ -143,16 +143,16 @@ def run_experiment(
             print(f"    {rname:22s} ERROR {str(e)[:160]}")
             continue
         rows.append(
-            dict(
-                experiment=name,
-                runner=rname,
-                ms=ms,
-                correct=ok,
-                size=size_note,
-                nodes=n_nodes,
-                machine=platform.machine(),
-                ts=time.time(),
-            )
+            {
+                "experiment": name,
+                "runner": rname,
+                "ms": ms,
+                "correct": ok,
+                "size": size_note,
+                "nodes": n_nodes,
+                "machine": platform.machine(),
+                "ts": time.time(),
+            }
         )
     base_ms = rows[0]["ms"] if rows else None
     for r in rows:

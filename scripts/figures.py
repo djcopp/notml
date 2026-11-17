@@ -209,7 +209,6 @@ def results_tables() -> str:
 
 
 def main() -> None:
-    svg.write(gallery_chart, "gallery", "Simulation speed relative to plain JavaScript", OUT)
     svg.write(portability_diagram, "portability", "One ONNX file runs on every runtime", OUT)
     svg.write(native_chart, "native", "Native speed-ups over the usual tool", OUT)
     svg.write(browser_chart, "browser", "WebGPU vs WASM in the browser", OUT)

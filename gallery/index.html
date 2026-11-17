@@ -40,6 +40,11 @@
   button.plain { font: inherit; font-size: 14px; padding: 8px 14px; border-radius: 9px; border: 1px solid var(--line);
     background: var(--surface); color: var(--ink); cursor: pointer; }
   button.plain:hover { border-color: var(--accent); }
+  .measured { margin-top: 22px; border-collapse: collapse; font-size: 14px; width: 100%; max-width: 640px; }
+  .measured caption { text-align: left; color: var(--muted); padding-bottom: 6px; }
+  .measured th, .measured td { border-bottom: 1px solid var(--line); padding: 6px 10px; text-align: right; font-variant-numeric: tabular-nums; }
+  .measured th:first-child, .measured td:first-child { text-align: left; }
+  .measured td.best { color: var(--accent); font-weight: 600; }
   @media (max-width: 600px) { .group button { padding: 8px 10px; font-size: 13px; } }
 </style>
 </head>
@@ -72,10 +77,16 @@
 
   <div class="stats">
     <div class="stat"><b id="rate">–</b><span>steps per second</span></div>
-    <div class="stat"><b id="fps">–</b><span>frames per second</span></div>
+    <div class="stat"><b id="fps">–</b><span>frames per second, <span id="per-frame"></span> steps each</span></div>
     <div class="stat"><b id="size">–</b><span id="size-label">size</span></div>
     <div class="stat"><b id="bytes">–</b><span>model file</span></div>
   </div>
+
+  <table class="measured" id="measured" hidden>
+    <caption>Measured on this device, steps per second</caption>
+    <thead><tr><th>simulation</th><th>ONNX on WASM</th><th>ONNX on WebGPU</th><th>plain JavaScript</th></tr></thead>
+    <tbody></tbody>
+  </table>
 
   <p class="about" id="about"></p>
   <p class="about">Source: <a href="https://github.com/djcopp/notml">github.com/djcopp/notml</a>. The models are
@@ -289,6 +300,7 @@ async function begin(token) {
   $("size").textContent = sim === "particles" ? m.n.toLocaleString() : `${m.size} × ${m.size}`;
   $("size-label").textContent = sim === "particles" ? "particles" : "grid";
   $("bytes").textContent = `${(m.bytes / 1024).toFixed(1)} KB`;
+  $("per-frame").textContent = SIMS[sim].stepsPerCall();
   $("about").textContent = ABOUT[sim];
   $("rate").textContent = "–"; $("fps").textContent = "–";
   await inflight;  // never release a session while a frame is still running on it
@@ -309,8 +321,13 @@ async function begin(token) {
     if (token !== running) return;
     let image;
     if (engine === "js") {
-      def.jsStep(state);
-      steps += 1;
+      // Same work per frame as the ONNX engines, so frame rates compare fairly. Stop early only if a frame
+      // would take longer than a second (Lenia in plain JavaScript), to keep the page responsive.
+      const t0 = performance.now();
+      for (let k = 0; k < def.stepsPerCall() && (k === 0 || performance.now() - t0 < 1000); k++) {
+        def.jsStep(state);
+        steps += 1;
+      }
     } else {
       inflight = session.run(gpuState);
       const out = await inflight;
@@ -333,6 +350,7 @@ async function begin(token) {
       $("rate").textContent = rate >= 100 ? Math.round(rate).toLocaleString() : rate.toFixed(1);
       $("fps").textContent = (frames / sec).toFixed(0);
       window.benchLast = { sim, engine, steps_per_s: rate, fps: frames / sec };
+      record(sim, engine, rate);
       steps = 0; frames = 0; lastTick = now;
     }
     requestAnimationFrame(frame);
@@ -350,6 +368,26 @@ for (const b of document.querySelectorAll("#engines button")) b.onclick = () => 
   location.search = new URLSearchParams({ sim: current.sim, engine: b.dataset.engine }).toString();
 };
 $("reset").onclick = () => start();
+// Each engine's latest rate per simulation, kept across the page reloads an engine switch causes.
+const NAMES = { life: "Game of Life", grayscott: "Reaction–diffusion", lenia: "Lenia", particles: "Particle Life" };
+function load() { try { return JSON.parse(localStorage.getItem("notml-measured") || "{}"); } catch { return {}; } }
+function record(sim, engine, rate) {
+  const m = load();
+  (m[sim] ??= {})[engine] = rate;
+  try { localStorage.setItem("notml-measured", JSON.stringify(m)); } catch {}
+  renderMeasured(m);
+}
+function renderMeasured(m = load()) {
+  const rows = Object.keys(NAMES).filter((s) => m[s]);
+  $("measured").hidden = rows.length === 0;
+  $("measured").tBodies[0].innerHTML = rows.map((s) => {
+    const best = Math.max(...["wasm", "webgpu", "js"].map((e) => m[s][e] ?? 0));
+    const cell = (e) => m[s][e] == null ? "<td>–</td>" : `<td class="${m[s][e] === best ? "best" : ""}">${m[s][e] >= 100 ? Math.round(m[s][e]) : m[s][e].toFixed(1)}</td>`;
+    return `<tr><td>${NAMES[s]}</td>${cell("wasm")}${cell("webgpu")}${cell("js")}</tr>`;
+  }).join("");
+}
+renderMeasured();
+
 window.galleryDebug = () => ({ steps, frames, engine: current.engine, session: !!session, running });
 window.gallery = { select: (sim, engine) => { current = { sim, engine }; return start(); } };
 start();

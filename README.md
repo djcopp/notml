@@ -4,41 +4,30 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Simulations written as ONNX graphs and run in the browser by onnxruntime-web. Each one is a few kilobytes
-of ONNX, built in Python, and steps a world of up to four million cells on WebAssembly or WebGPU. Against
-the same rules written in plain JavaScript, the ONNX version of Lenia runs **197 times faster**.
+of ONNX, built in Python, and steps a world of up to four million cells on WebAssembly or WebGPU. The page
+also runs the same rules written in plain JavaScript, and shows a table of what it measured on your device.
 
 **[Open the gallery](https://djcopp.github.io/notml/)**
 
 ![Lenia, Gray–Scott reaction–diffusion, the Game of Life and Particle Life, as rendered by the gallery](docs/img/gallery.png)
 
-## Speed
+## How fast is it?
 
-Steps per second in Chromium on an Apple M5, the same rules in each engine:
+It depends on the simulation, the engine and the device, so the page measures it for you. In my runs (Chromium,
+Apple M5), the pattern was consistent even though the exact numbers moved a lot between runs:
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/img/gallery-dark.svg">
-  <img alt="Speed relative to plain JavaScript. Lenia: 197 times on WASM, 59 on WebGPU. Game of Life: 9 and 3 times. Reaction–diffusion: 7 and 8 times. Particle Life: 0.16 and 0.74 times." src="docs/img/gallery-light.svg">
-</picture>
+- **Lenia is where ONNX wins big:** 40 to 130 steps per second against about 0.6 in plain JavaScript. Every
+  cell reads 729 neighbours, which onnxruntime runs as one dense convolution and JavaScript does one
+  multiply at a time.
+- **Game of Life and reaction–diffusion:** from roughly level to a few times faster than JavaScript. These
+  stencils are only 9 cells wide, and a tight JavaScript loop is already quick.
+- **Particle Life is slower as ONNX.** Every pair of particles interacts, so each step builds several
+  16.7-million-element tensors, one operation at a time. onnxruntime-web doesn't fuse operations, and a
+  JavaScript loop that keeps each pair's maths in registers wins.
 
-| simulation | world | ONNX on WASM | ONNX on WebGPU | plain JavaScript |
-|---|---|---:|---:|---:|
-| Lenia | 512 × 512, 27 × 27 kernel | 130 | 39 | 0.66 |
-| Game of Life | 2048 × 2048 | 277 | 91 | 31 |
-| Gray–Scott reaction–diffusion | 768 × 768, two chemicals | 424 | 474 | 60 |
-| Particle Life | 4,096 particles, all pairs | 3.5 | 16 | 22 |
-
-The three grid simulations are convolutions, and onnxruntime turns a convolution into the kind of dense
-matrix work its kernels are tuned for. Lenia gains the most because each cell reads 729 neighbours, which
-hand-written JavaScript does one multiply at a time.
-
-Particle Life is the counterexample. Every pair of particles interacts, so each step builds several
-16.7-million-element tensors, one operation at a time. onnxruntime-web doesn't fuse operations, so
-that memory traffic costs more than a JavaScript loop that keeps each pair's maths in registers.
-
-WebAssembly beats WebGPU on most of these. onnxruntime-web's WASM backend runs its convolutions on every
-core with SIMD, while its WebGPU convolution is slow for single-channel images and large kernels. WASM only
-gets all the cores when the page is cross-origin isolated; the gallery adds the required headers with a
-small service worker, so it works on GitHub Pages too.
+Multithreaded WebAssembly needs the page to be cross-origin isolated. The gallery adds the headers with a
+small service worker, which takes effect after the first reload. Until then WASM runs on one thread and is
+much slower.
 
 ## Use it
 

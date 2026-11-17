@@ -93,6 +93,32 @@ def int_width_chart(theme: svg.Theme) -> svg.Canvas:
     return svg.time_chart(rows, theme, "time to check 1M strings, log scale (shorter is better)", log=True, label_w=150)
 
 
+GALLERY = [
+    ("lenia", "Lenia", "512 × 512, 27 × 27 kernel"),
+    ("life", "Game of Life", "2048 × 2048"),
+    ("grayscott", "Reaction–diffusion", "768 × 768"),
+    ("particles", "Particle Life", "4,096 particles"),
+]
+
+
+def gallery_chart(theme: svg.Theme) -> svg.Canvas:
+    report = json.loads((RESULTS / "gallery.json").read_text())
+    rate = {(r["sim"], r["engine"]): r["steps_per_s"] for r in report["results"] if "steps_per_s" in r}
+    rows = []
+    for sim, label, size in GALLERY:
+        js = rate[(sim, "js")]
+        values = {"ONNX on WASM": rate[(sim, "wasm")] / js, "ONNX on WebGPU": rate[(sim, "webgpu")] / js}
+        rows.append((label, f"{size} · plain JS {js:.1f} steps/s", values))
+    return svg.speedup_chart(
+        rows,
+        ["ONNX on WASM", "ONNX on WebGPU"],
+        theme,
+        "steps per second relative to plain JavaScript, log scale",
+        lo=0.1,
+        hi=300,
+    )
+
+
 def portability_diagram(theme: svg.Theme) -> svg.Canvas:
     t = theme
     c = svg.Canvas(880, 300, t)
@@ -183,6 +209,7 @@ def results_tables() -> str:
 
 
 def main() -> None:
+    svg.write(gallery_chart, "gallery", "Simulation speed relative to plain JavaScript", OUT)
     svg.write(portability_diagram, "portability", "One ONNX file runs on every runtime", OUT)
     svg.write(native_chart, "native", "Native speed-ups over the usual tool", OUT)
     svg.write(browser_chart, "browser", "WebGPU vs WASM in the browser", OUT)

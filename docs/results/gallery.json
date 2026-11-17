@@ -1,0 +1,80 @@
+{
+ "env": {
+  "threads": 10,
+  "isolated": true
+ },
+ "results": [
+  {
+   "sim": "life",
+   "engine": "webgpu",
+   "steps_per_s": 91.29554078332637,
+   "fps": 2.852985649478949
+  },
+  {
+   "sim": "life",
+   "engine": "wasm",
+   "steps_per_s": 277.21762064612557,
+   "fps": 8.663050645191424
+  },
+  {
+   "sim": "life",
+   "engine": "js",
+   "steps_per_s": 30.55075120360561,
+   "fps": 30.55075120360561
+  },
+  {
+   "sim": "grayscott",
+   "engine": "webgpu",
+   "steps_per_s": 474.38330170610317,
+   "fps": 19.765970904420968
+  },
+  {
+   "sim": "grayscott",
+   "engine": "wasm",
+   "steps_per_s": 424.34481945426285,
+   "fps": 17.68103414392762
+  },
+  {
+   "sim": "grayscott",
+   "engine": "js",
+   "steps_per_s": 60.063904055685946,
+   "fps": 60.063904055685946
+  },
+  {
+   "sim": "lenia",
+   "engine": "webgpu",
+   "steps_per_s": 39.06154634873872,
+   "fps": 9.76538658718468
+  },
+  {
+   "sim": "lenia",
+   "engine": "wasm",
+   "steps_per_s": 130.0954032956738,
+   "fps": 32.52385082391845
+  },
+  {
+   "sim": "lenia",
+   "engine": "js",
+   "steps_per_s": 0.6596610661411026,
+   "fps": 0.6596610661411026
+  },
+  {
+   "sim": "particles",
+   "engine": "webgpu",
+   "steps_per_s": 15.883258053402164,
+   "fps": 15.883258053402164
+  },
+  {
+   "sim": "particles",
+   "engine": "wasm",
+   "steps_per_s": 3.5477190383926303,
+   "fps": 3.5477190383926303
+  },
+  {
+   "sim": "particles",
+   "engine": "js",
+   "steps_per_s": 21.534741901136105,
+   "fps": 21.534741901136105
+  }
+ ]
+}

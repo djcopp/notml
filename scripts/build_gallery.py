@@ -12,8 +12,9 @@ import onnx
 from notml import sims
 
 SIMS = {
-    "life": {"size": 2048, "steps": 4, "build": lambda c: sims.life(c["size"], c["size"], c["steps"])},
+    "life": {"size": 2048, "steps": 32, "build": lambda c: sims.life(c["size"], c["size"], c["steps"])},
     "grayscott": {"size": 768, "steps": 24, "build": lambda c: sims.gray_scott(c["size"], c["size"], c["steps"])},
+    "lenia": {"size": 512, "steps": 4, "radius": 13, "build": lambda c: sims.lenia(c["size"], c["size"], c["steps"])},
     "particles": {
         "n": 4096,
         "types": 6,

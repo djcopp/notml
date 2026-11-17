@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>notml gallery</title>
+<meta name="description" content="Simulations stepped by one small ONNX file on your GPU, in the browser.">
+<link rel="icon" href="data:,">
+<script src="isolate.js"></script>
+<style>
+  :root {
+    --bg: #0f1011; --surface: #17181a; --ink: #ecebe8; --muted: #9c998f; --line: #2a2b2e;
+    --accent: #3987e5; --accent-ink: #ffffff; --warm: #d95926;
+  }
+  :root[data-theme="light"] {
+    --bg: #fbfaf8; --surface: #ffffff; --ink: #1c1b19; --muted: #66635c; --line: #e4e1db;
+    --accent: #2a78d6; --accent-ink: #ffffff; --warm: #eb6834;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 ui-sans-serif, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 36px 16px 56px; }
+  header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+  h1 { font-size: 28px; line-height: 1.2; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .lead { color: var(--muted); margin: 0; max-width: 620px; }
+  .group { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+  .group button { font: inherit; font-size: 14px; padding: 8px 14px; border: 0; background: var(--surface); color: var(--ink);
+    cursor: pointer; border-right: 1px solid var(--line); transition: background 0.15s ease; }
+  .group button:last-child { border-right: 0; }
+  .group button:hover { background: var(--line); }
+  .group button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+  .bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 14px; }
+  .stage { position: relative; background: #000; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  canvas { display: block; width: 100%; height: auto; aspect-ratio: 1 / 1; max-height: 72vh; margin: 0 auto; image-rendering: pixelated; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-top: 16px; }
+  .stat { border-top: 1px solid var(--line); padding-top: 10px; }
+  .stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 13px; }
+  .about { color: var(--muted); font-size: 14px; margin-top: 18px; max-width: 760px; }
+  a { color: var(--accent); }
+  button.plain { font: inherit; font-size: 14px; padding: 8px 14px; border-radius: 9px; border: 1px solid var(--line);
+    background: var(--surface); color: var(--ink); cursor: pointer; }
+  button.plain:hover { border-color: var(--accent); }
+  @media (max-width: 600px) { .group button { padding: 8px 10px; font-size: 13px; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Simulations in your browser, from one ONNX file</h1>
+      <p class="lead">Each simulation below is a few kilobytes of ONNX, built in Python and stepped by onnxruntime-web
+        on WebGPU or WebAssembly. Switch engines to compare with the same rules written in plain JavaScript.</p>
+    </div>
+  </header>
+
+  <div class="bar">
+    <div class="group" id="sims" role="group" aria-label="Simulation">
+      <button data-sim="life">Game of Life</button>
+      <button data-sim="grayscott">Reaction–diffusion</button>
+      <button data-sim="lenia">Lenia</button>
+      <button data-sim="particles">Particle Life</button>
+    </div>
+    <div class="group" id="engines" role="group" aria-label="Engine">
+      <button data-engine="webgpu">ONNX on WebGPU</button>
+      <button data-engine="wasm">ONNX on WASM</button>
+      <button data-engine="js">Plain JavaScript</button>
+    </div>
+    <button class="plain" id="reset">Reset</button>
+  </div>
+
+  <div class="stage"><canvas id="view" width="1024" height="1024" aria-label="Simulation"></canvas></div>
+
+  <div class="stats">
+    <div class="stat"><b id="rate">–</b><span>steps per second</span></div>
+    <div class="stat"><b id="fps">–</b><span>frames per second</span></div>
+    <div class="stat"><b id="size">–</b><span id="size-label">size</span></div>
+    <div class="stat"><b id="bytes">–</b><span>model file</span></div>
+  </div>
+
+  <p class="about" id="about"></p>
+  <p class="about">Source: <a href="https://github.com/djcopp/notml">github.com/djcopp/notml</a>. The models are
+    built by <code>notml.sims</code> and checked against numpy versions of the same rules.</p>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/ort.webgpu.min.js"></script>
+<script type="module">
+const params = new URLSearchParams(location.search);
+const $ = (id) => document.getElementById(id);
+const meta = await (await fetch("models/meta.json")).json();
+ort.env.wasm.numThreads = navigator.hardwareConcurrency;
+if (!("gpu" in navigator)) document.querySelector('[data-engine="webgpu"]').disabled = true;
+
+const ABOUT = {
+  life: "Conway's Game of Life on a 2048 × 2048 torus: four million cells, each step a 3 × 3 convolution counting neighbours and two comparisons.",
+  grayscott: "Gray–Scott reaction–diffusion: two chemicals diffuse (a Laplacian convolution) and react (U + 2V → 3V). The spots split and spread like cells dividing.",
+  lenia: "Lenia, a continuous Game of Life: each step blurs the world with a 27 × 27 ring (729 multiply-adds per cell) and grows or shrinks each cell by how close that blur is to a sweet spot. Smooth, worm-like structures grow, split and rearrange.",
+  particles: "Particle Life: 4,096 particles of six colours. Every particle attracts or repels every other, by a random rule for each pair of colours. That is 16.7 million interactions a step.",
+};
+
+// ---- the simulations: initial state, a plain-JavaScript step, and drawing ----
+
+function rng(seed) { return () => ((seed = (seed * 16807) % 2147483647) / 2147483647); }
+
+const SIMS = {
+  life: {
+    init() {
+      const n = meta.life.size, r = rng(7), cells = new Float32Array(n * n);
+      for (let i = 0; i < cells.length; i++) cells[i] = r() < 0.25 ? 1 : 0;
+      return { cells };
+    },
+    feeds: (s) => ({ cells: s.cells }),
+    shapes: () => ({ cells: [1, 1, meta.life.size, meta.life.size] }),
+    loop: { cells: "cells_out" },
+    jsStep(s) {
+      const n = meta.life.size, a = s.cells, b = s.next ??= new Float32Array(n * n);
+      for (let y = 0; y < n; y++) {
+        const up = ((y + n - 1) % n) * n, row = y * n, down = ((y + 1) % n) * n;
+        for (let x = 0; x < n; x++) {
+          const l = (x + n - 1) % n, r = (x + 1) % n;
+          const c = a[up + l] + a[up + x] + a[up + r] + a[row + l] + a[row + r] + a[down + l] + a[down + x] + a[down + r];
+          b[row + x] = c === 3 || (c === 2 && a[row + x] === 1) ? 1 : 0;
+        }
+      }
+      s.next = a; s.cells = b;
+    },
+    image: (s) => s.cells,  // float 0/1 per cell
+    scale: 1,
+    stepsPerCall: () => meta.life.steps,
+  },
+  grayscott: {
+    init() {
+      const n = meta.grayscott.size, uv = new Float32Array(2 * n * n), r = rng(3);
+      uv.fill(1, 0, n * n);
+      for (let k = 0; k < 40; k++) {
+        const cx = Math.floor(r() * n), cy = Math.floor(r() * n);
+        for (let y = -6; y < 6; y++) for (let x = -6; x < 6; x++) {
+          const i = ((cy + y + n) % n) * n + ((cx + x + n) % n);
+          uv[i] = 0.5; uv[n * n + i] = 0.25 + 0.1 * r();
+        }
+      }
+      return { uv };
+    },
+    feeds: (s) => ({ uv: s.uv }),
+    shapes: () => ({ uv: [1, 2, meta.grayscott.size, meta.grayscott.size] }),
+    loop: { uv: "uv_out" },
+    jsStep(s) {
+      const n = meta.grayscott.size, N = n * n, a = s.uv, b = s.next ??= new Float32Array(2 * N);
+      const F = 0.0367, K = 0.0649;
+      for (let y = 0; y < n; y++) {
+        const up = ((y + n - 1) % n) * n, row = y * n, down = ((y + 1) % n) * n;
+        for (let x = 0; x < n; x++) {
+          const l = (x + n - 1) % n, r = (x + 1) % n, i = row + x;
+          const lap = (o) => 0.2 * (a[o + up + x] + a[o + down + x] + a[o + row + l] + a[o + row + r])
+            + 0.05 * (a[o + up + l] + a[o + up + r] + a[o + down + l] + a[o + down + r]) - a[o + i];
+          const u = a[i], v = a[N + i], uvv = u * v * v;
+          b[i] = u + lap(0) - uvv + F * (1 - u);
+          b[N + i] = v + 0.5 * lap(N) + uvv - (F + K) * v;
+        }
+      }
+      s.next = a; s.uv = b;
+    },
+    image: (s) => s.uv.subarray(meta.grayscott.size ** 2).map((v) => Math.min(1, v * 3)),
+    stepsPerCall: () => meta.grayscott.steps,
+  },
+  lenia: {
+    init() {
+      const n = meta.lenia.size, r = rng(5), world = new Float32Array(n * n);
+      for (let k = 0; k < 30; k++) {
+        const cx = Math.floor(r() * n), cy = Math.floor(r() * n), s = 12 + Math.floor(r() * 14);
+        for (let y = -s; y < s; y++) for (let x = -s; x < s; x++) world[((cy + y + n) % n) * n + ((cx + x + n) % n)] = r();
+      }
+      return { world };
+    },
+    feeds: (s) => ({ world: s.world }),
+    shapes: () => ({ world: [1, 1, meta.lenia.size, meta.lenia.size] }),
+    loop: { world: "world_out" },
+    jsStep(s) {
+      const n = meta.lenia.size, R = meta.lenia.radius, a = s.world, b = s.next ??= new Float32Array(n * n);
+      if (!s.kernel) {  // same ring kernel as notml.sims.lenia_kernel, as a list of taps
+        const taps = []; let total = 0;
+        for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+          const q = Math.sqrt(dx * dx + dy * dy) / R;
+          if (q > 0 && q < 1) { const w = Math.exp(4 - 1 / (q * (1 - q))); taps.push([dy, dx, w]); total += w; }
+        }
+        s.kernel = taps.map(([dy, dx, w]) => [dy, dx, w / total]);
+      }
+      for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+        let u = 0;
+        for (const [dy, dx, w] of s.kernel) u += w * a[((y + dy + n) % n) * n + ((x + dx + n) % n)];
+        const z = (u - 0.15) / 0.017;
+        b[y * n + x] = Math.min(1, Math.max(0, a[y * n + x] + 0.1 * (2 * Math.exp(-0.5 * z * z) - 1)));
+      }
+      s.next = a; s.world = b;
+    },
+    image: (s) => s.world,
+    stepsPerCall: () => meta.lenia.steps,
+  },
+  particles: {
+    init() {
+      const { n, types } = meta.particles, r = rng(11);
+      const pos = new Float32Array(2 * n), vel = new Float32Array(2 * n), kind = new Float32Array(n * types), type = new Int32Array(n);
+      for (let i = 0; i < n; i++) { pos[2 * i] = r(); pos[2 * i + 1] = r(); type[i] = Math.floor(r() * types); kind[i * types + type[i]] = 1; }
+      const rules = new Float32Array(types * types).map(() => r() * 2 - 1);
+      return { pos, vel, kind, rules, type };
+    },
+    feeds: (s) => ({ pos: s.pos, vel: s.vel, kind: s.kind, rules: s.rules }),
+    shapes: () => { const { n, types } = meta.particles; return { pos: [n, 2], vel: [n, 2], kind: [n, types], rules: [types, types] }; },
+    loop: { pos: "pos_out", vel: "vel_out" },
+    keepOnCpu: ["pos_out"],
+    jsStep(s) {
+      const { n, types } = meta.particles, R = 0.08, B = 0.3, FR = 0.707, DT = 0.02, FORCE = 10;
+      const { pos, vel, rules, type } = s;
+      for (let i = 0; i < n; i++) {
+        let ax = 0, ay = 0;
+        const xi = pos[2 * i], yi = pos[2 * i + 1], row = type[i] * types;
+        for (let j = 0; j < n; j++) {
+          let dx = pos[2 * j] - xi, dy = pos[2 * j + 1] - yi;
+          dx -= Math.floor(dx + 0.5); dy -= Math.floor(dy + 0.5);
+          const r = Math.sqrt(dx * dx + dy * dy + 1e-9), x = r / R;
+          let f = 0;
+          if (x < B) f = x / B - 1;
+          else if (x < 1) f = rules[row + type[j]] * (1 - Math.abs(2 * x - 1 - B) / (1 - B));
+          ax += (dx / r) * f; ay += (dy / r) * f;
+        }
+        vel[2 * i] = vel[2 * i] * FR + ax * FORCE * R * DT;
+        vel[2 * i + 1] = vel[2 * i + 1] * FR + ay * FORCE * R * DT;
+      }
+      for (let k = 0; k < 2 * n; k++) { const p = pos[k] + vel[k] * DT; pos[k] = p - Math.floor(p); }
+    },
+    stepsPerCall: () => meta.particles.steps,
+  },
+};
+
+// ---- drawing ----
+
+const canvas = $("view"), ctx = canvas.getContext("2d");
+const COLOURS = [[57, 135, 229], [217, 89, 38], [25, 158, 112], [201, 133, 0], [213, 81, 129], [12, 163, 12]];
+
+let imageData;
+function drawField(values, n, colour) {
+  if (canvas.width !== n) { canvas.width = n; canvas.height = n; }
+  if (!imageData || imageData.width !== n) imageData = ctx.createImageData(n, n);
+  const img = imageData, d = img.data, scale = values instanceof Uint8Array ? 1 / 255 : 1;
+  for (let i = 0; i < n * n; i++) {
+    const v = values[i] * scale;
+    d[4 * i] = colour[0] * v; d[4 * i + 1] = colour[1] * v; d[4 * i + 2] = colour[2] * v; d[4 * i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function drawParticles(pos, type) {
+  const size = 1024;
+  if (canvas.width !== size) { canvas.width = size; canvas.height = size; }
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, size, size);
+  for (let i = 0; i < type.length; i++) {
+    const c = COLOURS[type[i]];
+    ctx.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`;
+    ctx.fillRect(pos[2 * i] * size - 1.5, pos[2 * i + 1] * size - 1.5, 3, 3);
+  }
+}
+
+function draw(name, s, image) {
+  if (name === "particles") return drawParticles(s.pos, s.type);
+  const n = meta[name].size;
+  const colour = { life: [236, 235, 232], grayscott: [120, 190, 255], lenia: [255, 170, 90] }[name];
+  drawField(image ?? SIMS[name].image(s), n, colour);
+}
+
+// ---- engines ----
+
+// WASM with all cores is the fastest engine for most of these; without cross-origin isolation it gets one thread.
+const defaultEngine = self.crossOriginIsolated || !("gpu" in navigator) ? "wasm" : "webgpu";
+let current = { sim: params.get("sim") || "lenia", engine: params.get("engine") || defaultEngine };
+let state, session, inflight = Promise.resolve(), gpuState = {}, running = 0, steps = 0, frames = 0, lastTick = performance.now();
+
+// onnxruntime-web can only create one WebGPU session at a time, so starts are queued.
+let queue = Promise.resolve();
+function start() {
+  const token = ++running;
+  queue = queue.then(() => (token === running ? begin(token) : undefined)).catch((e) => console.error(e));
+  return queue;
+}
+
+async function begin(token) {
+  const { sim, engine } = current;
+  for (const b of document.querySelectorAll("#sims button")) b.setAttribute("aria-pressed", b.dataset.sim === sim);
+  for (const b of document.querySelectorAll("#engines button")) b.setAttribute("aria-pressed", b.dataset.engine === engine);
+  const m = meta[sim];
+  $("size").textContent = sim === "particles" ? m.n.toLocaleString() : `${m.size} × ${m.size}`;
+  $("size-label").textContent = sim === "particles" ? "particles" : "grid";
+  $("bytes").textContent = `${(m.bytes / 1024).toFixed(1)} KB`;
+  $("about").textContent = ABOUT[sim];
+  $("rate").textContent = "–"; $("fps").textContent = "–";
+  await inflight;  // never release a session while a frame is still running on it
+  if (session) { await session.release(); session = null; }
+  for (const t of Object.values(gpuState)) t.dispose?.();
+  gpuState = {};
+  state = SIMS[sim].init();
+  steps = 0; frames = 0; lastTick = performance.now();
+  const def = SIMS[sim];
+  if (engine !== "js") {
+    const outputs = {};
+    if (engine === "webgpu") for (const out of Object.values(def.loop)) outputs[out] = (def.keepOnCpu || []).includes(out) ? "cpu" : "gpu-buffer";
+    session = await ort.InferenceSession.create(`models/${sim}.onnx`, { executionProviders: [engine], preferredOutputLocation: outputs });
+    const shapes = def.shapes();
+    for (const [k, v] of Object.entries(def.feeds(state))) gpuState[k] = new ort.Tensor("float32", v, shapes[k]);
+  }
+  const frame = async () => {
+    if (token !== running) return;
+    let image;
+    if (engine === "js") {
+      def.jsStep(state);
+      steps += 1;
+    } else {
+      inflight = session.run(gpuState);
+      const out = await inflight;
+      if (token !== running) return;
+      for (const [input, output] of Object.entries(def.loop)) {
+        const old = gpuState[input];
+        gpuState[input] = out[output];
+        if (old !== out[output] && old.location === "gpu-buffer") old.dispose();
+      }
+      steps += def.stepsPerCall();
+      if (sim === "particles") state.pos = out.pos_out.data;
+      else image = out.image.data;
+    }
+    frames += 1;
+    draw(sim, state, image);
+    const now = performance.now();
+    if (now - lastTick > 1000) {
+      const sec = (now - lastTick) / 1000;
+      const rate = steps / sec;
+      $("rate").textContent = rate >= 100 ? Math.round(rate).toLocaleString() : rate.toFixed(1);
+      $("fps").textContent = (frames / sec).toFixed(0);
+      window.benchLast = { sim, engine, steps_per_s: rate, fps: frames / sec };
+      steps = 0; frames = 0; lastTick = now;
+    }
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
+
+for (const b of document.querySelectorAll("#sims button")) b.onclick = () => {
+  current.sim = b.dataset.sim;
+  history.replaceState(null, "", "?" + new URLSearchParams(current));
+  start();
+};
+// Switching backends reloads the page: onnxruntime-web 1.30 fails if a WASM session follows a WebGPU one.
+for (const b of document.querySelectorAll("#engines button")) b.onclick = () => {
+  location.search = new URLSearchParams({ sim: current.sim, engine: b.dataset.engine }).toString();
+};
+$("reset").onclick = () => start();
+window.galleryDebug = () => ({ steps, frames, engine: current.engine, session: !!session, running });
+window.gallery = { select: (sim, engine) => { current = { sim, engine }; return start(); } };
+start();
+</script>
+</body>
+</html>

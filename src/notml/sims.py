@@ -25,25 +25,59 @@ def _wrap_pad(g: Graph, x: str, k: int) -> str:
 
 def life(height: int, width: int, steps: int = 8) -> onnx.ModelProto:
     """Conway's Game of Life. Input and output ``cells``: float32 ``[1, 1, H, W]``, 1 alive and 0 dead.
-    Also outputs ``image``: uint8 ``[H, W]``, 255 for live cells, ready to draw."""
+    Also outputs ``image``: uint8 ``[H, W]``, 255 for live cells, ready to draw.
+
+    The rules fold into one convolution. With v = neighbours + cell / 2, a cell is alive next step exactly
+    when 2.5 <= v <= 3.5, so the kernel computes u = 2v - 6 (centre weight 1, neighbours 2, bias -6) and
+    the next state is clip(2 - |u|, 0, 1). That is three passes per step instead of eight comparisons.
+    """
     g = Graph("life")
     x = g.input("cells", np.float32, [1, 1, height, width])
-    kernel = np.ones((1, 1, 3, 3), np.float32)
-    kernel[0, 0, 1, 1] = 0
-    k = g.const(kernel)
-    three, two, half = (g.const(np.float32(v)) for v in (3, 2, 0.5))
+    kernel = np.full((1, 1, 3, 3), 2.0, np.float32)
+    kernel[0, 0, 1, 1] = 1.0
+    k, bias = g.const(kernel), g.const(np.array([-6.0], np.float32))
+    two, zero, one = (g.const(np.float32(v)) for v in (2, 0, 1))
     for _ in range(steps):
-        neighbours = g.op("Conv", _wrap_pad(g, x, 1), k, pads=[0, 0, 0, 0])
-        born = g.op("Equal", neighbours, three)
-        stays = g.op("And", g.op("Equal", neighbours, two), g.op("Greater", x, half))
-        x = g.op("Cast", g.op("Or", born, stays), to=TensorProto.FLOAT)
+        u = g.op("Conv", _wrap_pad(g, x, 1), k, bias, pads=[0, 0, 0, 0])
+        x = g.op("Clip", g.op("Sub", two, g.op("Abs", u)), zero, one)
     g.output(x, "cells_out", np.float32, [1, 1, height, width])
-    image = g.op(
-        "Cast",
-        g.op("Mul", g.op("Reshape", x, g.const(np.array([height, width], np.int64))), g.const(np.float32(255))),
-        to=TensorProto.UINT8,
-    )
+    flat = g.op("Reshape", x, g.const(np.array([height, width], np.int64)))
+    image = g.op("Cast", g.op("Mul", flat, g.const(np.float32(255))), to=TensorProto.UINT8)
     g.output(image, "image", np.uint8, [height, width])
+    return g.model()
+
+
+# Lenia parameters close to the "Orbium" creature (Chan, 2019): kernel radius 13, growth centre 0.15.
+LENIA = {"radius": 13, "mu": 0.15, "sigma": 0.017, "dt": 0.1}
+
+
+def lenia_kernel(radius: int) -> np.ndarray:
+    """Smooth ring: exp(4 - 1 / (r (1 - r))) for r in (0, 1), normalised to sum to 1."""
+    y, x = np.mgrid[-radius : radius + 1, -radius : radius + 1]
+    r = np.sqrt(x**2 + y**2) / radius
+    inside = (r > 0) & (r < 1)
+    k = np.zeros_like(r)
+    k[inside] = np.exp(4 - 1 / (r[inside] * (1 - r[inside])))
+    return (k / k.sum()).astype(np.float32)
+
+
+def lenia(height: int, width: int, steps: int = 4, **params) -> onnx.ModelProto:
+    """Lenia, a continuous Game of Life. Input and output ``world``: float32 ``[1, 1, H, W]`` in [0, 1].
+    Each step convolves with a 27 x 27 ring kernel (729 multiply-adds per cell) and applies a smooth
+    growth function. Also outputs ``image``: uint8 ``[H, W]``."""
+    p = {**LENIA, **params}
+    g = Graph("lenia")
+    a = g.input("world", np.float32, [1, 1, height, width])
+    k = g.const(lenia_kernel(p["radius"])[None, None])
+    f32 = lambda v: g.const(np.float32(v))  # noqa: E731
+    for _ in range(steps):
+        u = g.op("Conv", _wrap_pad(g, a, p["radius"]), k, pads=[0, 0, 0, 0])
+        z = g.op("Div", g.op("Sub", u, f32(p["mu"])), f32(p["sigma"]))
+        growth = g.op("Sub", g.op("Mul", f32(2), g.op("Exp", g.op("Mul", f32(-0.5), g.op("Mul", z, z)))), f32(1))
+        a = g.op("Clip", g.op("Add", a, g.op("Mul", f32(p["dt"]), growth)), f32(0), f32(1))
+    g.output(a, "world_out", np.float32, [1, 1, height, width])
+    flat = g.op("Reshape", a, g.const(np.array([height, width], np.int64)))
+    g.output(g.op("Cast", g.op("Mul", flat, f32(255)), to=TensorProto.UINT8), "image", np.uint8, [height, width])
     return g.model()
 
 
@@ -105,7 +139,7 @@ def particle_life(
     attraction = g.op("MatMul", g.op("MatMul", kind, rules), g.op("Transpose", kind, perm=[1, 0]))
     for _ in range(steps):
         d = g.op("Sub", g.op("Unsqueeze", pos, i64([0])), g.op("Unsqueeze", pos, i64([1])))  # [n, n, 2], j - i
-        d = g.op("Sub", d, g.op("Round", d))  # shortest way round the torus
+        d = g.op("Sub", d, g.op("Floor", g.op("Add", d, f32(0.5))))  # shortest way round the torus
         r = g.op("Sqrt", g.op("Add", g.op("ReduceSum", g.op("Mul", d, d), i64([2]), keepdims=0), f32(1e-9)))
         x = g.op("Div", r, f32(radius))  # distance in units of the interaction radius
         repel = g.op("Sub", g.op("Div", x, f32(beta)), f32(1))

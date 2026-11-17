@@ -68,7 +68,7 @@ def test_gray_scott():
 def numpy_particle_life(pos, vel, kind, rules, radius=0.08, beta=0.3, friction=0.707, dt=0.02, force=10.0):
     attraction = kind @ rules @ kind.T
     d = pos[None, :, :] - pos[:, None, :]
-    d -= np.round(d)
+    d -= np.floor(d + 0.5)
     r = np.sqrt((d**2).sum(-1) + 1e-9)
     x = r / radius
     strength = np.where(
@@ -91,3 +91,23 @@ def test_particle_life():
     ref_pos, ref_vel = numpy_particle_life(pos, vel, kind, rules)
     np.testing.assert_allclose(new_vel, ref_vel, atol=1e-4)
     np.testing.assert_allclose(new_pos, ref_pos, atol=1e-5)
+
+
+def numpy_lenia(a, steps, radius, mu, sigma, dt):
+    k = sims.lenia_kernel(radius)
+    for _ in range(steps):
+        u = np.zeros_like(a, dtype=np.float64)
+        for dy in range(-radius, radius + 1):
+            for dx in range(-radius, radius + 1):
+                w = k[dy + radius, dx + radius]
+                if w:
+                    u += w * np.roll(np.roll(a, -dy, 0), -dx, 1)
+        a = np.clip(a + dt * (2 * np.exp(-0.5 * ((u - mu) / sigma) ** 2) - 1), 0, 1)
+    return a
+
+
+def test_lenia():
+    a = np.random.default_rng(3).random((40, 48)).astype(np.float32)
+    out, image = run(sims.lenia(40, 48, steps=3), world=a[None, None])
+    np.testing.assert_allclose(out[0, 0], numpy_lenia(a.astype(np.float64), 3, **sims.LENIA), atol=1e-4)
+    assert image.shape == (40, 48)

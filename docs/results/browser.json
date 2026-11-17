@@ -1,0 +1,144 @@
+{
+ "env": {
+  "ort": "1.30.0",
+  "webgpu": "apple",
+  "threads": 10,
+  "isolated": true,
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/141.0.0.0 Safari/537.36"
+ },
+ "results": [
+  {
+   "case": "nbody",
+   "backend": "webgpu",
+   "ms": 50.40999999642372,
+   "correct": true
+  },
+  {
+   "case": "nbody",
+   "backend": "wasm",
+   "ms": 163.70499999821186,
+   "correct": true
+  },
+  {
+   "case": "groupby",
+   "backend": "webgpu",
+   "ms": 47.83000001311302,
+   "correct": true
+  },
+  {
+   "case": "groupby",
+   "backend": "wasm",
+   "ms": 19.55000001192093,
+   "correct": true
+  },
+  {
+   "case": "montecarlo_torch_rng",
+   "backend": "webgpu",
+   "ms": 538.6149999946356,
+   "correct": true
+  },
+  {
+   "case": "montecarlo_torch_rng",
+   "backend": "wasm",
+   "ms": 574.3500000089407,
+   "correct": true
+  },
+  {
+   "case": "montecarlo_pcg",
+   "backend": "webgpu",
+   "ms": 1175.4449999928474,
+   "correct": true
+  },
+  {
+   "case": "montecarlo_pcg",
+   "backend": "wasm",
+   "ms": 935.9399999976158,
+   "correct": true
+  },
+  {
+   "case": "montecarlo_muldiv",
+   "backend": "webgpu",
+   "ms": 366.6850000023842,
+   "correct": false
+  },
+  {
+   "case": "montecarlo_muldiv",
+   "backend": "wasm",
+   "ms": 1265.4449999928474,
+   "correct": false
+  },
+  {
+   "case": "regex_dfa_int64",
+   "backend": "webgpu",
+   "ms": 214.07999999821186,
+   "correct": true
+  },
+  {
+   "case": "regex_dfa_int64",
+   "backend": "wasm",
+   "ms": 184.13500000536442,
+   "correct": true
+  },
+  {
+   "case": "regex_dfa_int32",
+   "backend": "webgpu",
+   "ms": 61.814999997615814,
+   "correct": true
+  },
+  {
+   "case": "regex_dfa_int32",
+   "backend": "wasm",
+   "ms": 231.38499999046326,
+   "correct": true
+  },
+  {
+   "case": "pagerank",
+   "backend": "webgpu",
+   "ms": 7.674999997019768,
+   "correct": true
+  },
+  {
+   "case": "pagerank",
+   "backend": "wasm",
+   "ms": 39.21999999880791,
+   "correct": true
+  },
+  {
+   "case": "shortest_paths",
+   "backend": "webgpu",
+   "ms": 111.83500000834465,
+   "correct": true
+  },
+  {
+   "case": "shortest_paths",
+   "backend": "wasm",
+   "ms": 39.21999999880791,
+   "correct": true
+  },
+  {
+   "case": "levenshtein",
+   "backend": "webgpu",
+   "ms": 588.6299999952316,
+   "correct": true
+  },
+  {
+   "case": "levenshtein",
+   "backend": "wasm",
+   "ms": 223.125,
+   "correct": true
+  },
+  {
+   "case": "vm",
+   "backend": "webgpu",
+   "ms": 5655.420000001788,
+   "correct": true
+  },
+  {
+   "case": "vm",
+   "backend": "wasm",
+   "ms": 9348.289999991655,
+   "correct": true
+  }
+ ],
+ "ts": 1794889337.9300961
+}

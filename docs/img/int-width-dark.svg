@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="168" viewBox="0 0 880 168" role="img">
+<title>The same DFA with int64 and int32</title>
+<line x1="150.0" y1="8.0" x2="150.0" y2="128.0" stroke="#30363d" stroke-width="1"/>
+<text x="150.0" y="142.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#9198a1" text-anchor="middle" dominant-baseline="middle">10 ms</text>
+<line x1="480.0" y1="8.0" x2="480.0" y2="128.0" stroke="#30363d" stroke-width="1"/>
+<text x="480.0" y="142.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#9198a1" text-anchor="middle" dominant-baseline="middle">100 ms</text>
+<line x1="810.0" y1="8.0" x2="810.0" y2="128.0" stroke="#30363d" stroke-width="1"/>
+<text x="810.0" y="142.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#9198a1" text-anchor="middle" dominant-baseline="middle">1.0 s</text>
+<text x="810.0" y="160.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#9198a1" text-anchor="end" dominant-baseline="middle">time to check 1M strings, log scale (shorter is better)</text>
+<text x="138.0" y="23.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#e6edf3" text-anchor="end" dominant-baseline="middle">int64, WebGPU</text>
+<path d="M150.0,16.0 H585.1 Q589.1,16.0 589.1,20.0 V26.0 Q589.1,30.0 585.1,30.0 H150.0 Z" fill="#d95926"/>
+<text x="595.1" y="23.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#e6edf3" text-anchor="start" dominant-baseline="middle">214 ms</text>
+<text x="138.0" y="53.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#e6edf3" text-anchor="end" dominant-baseline="middle">int64, WASM</text>
+<path d="M150.0,46.0 H563.5 Q567.5,46.0 567.5,50.0 V56.0 Q567.5,60.0 563.5,60.0 H150.0 Z" fill="#6e7681"/>
+<text x="573.5" y="53.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#e6edf3" text-anchor="start" dominant-baseline="middle">184 ms</text>
+<text x="138.0" y="83.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#e6edf3" text-anchor="end" dominant-baseline="middle">int32, WebGPU</text>
+<path d="M150.0,76.0 H407.1 Q411.1,76.0 411.1,80.0 V86.0 Q411.1,90.0 407.1,90.0 H150.0 Z" fill="#3987e5"/>
+<text x="417.1" y="83.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#e6edf3" text-anchor="start" dominant-baseline="middle">62 ms</text>
+<text x="138.0" y="113.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#e6edf3" text-anchor="end" dominant-baseline="middle">int32, WASM</text>
+<path d="M150.0,106.0 H596.2 Q600.2,106.0 600.2,110.0 V116.0 Q600.2,120.0 596.2,120.0 H150.0 Z" fill="#6e7681"/>
+<text x="606.2" y="113.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#e6edf3" text-anchor="start" dominant-baseline="middle">231 ms</text>
+</svg>

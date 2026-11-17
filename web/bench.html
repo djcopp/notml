@@ -1,96 +1,149 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ONNX Lab Bench</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>onnx-lab browser bench</title>
 <style>
-  :root { --bg:#fff; --fg:#111; --muted:#666; --line:#ddd; --ok:#0a7d32; --bad:#b3261e; }
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#111; --fg:#eee; --muted:#999; --line:#333; --ok:#5fd38a; --bad:#ff8a80; } }
-  body { background:var(--bg); color:var(--fg); font:14px/1.4 system-ui, sans-serif; margin:16px; }
-  table { border-collapse:collapse; width:100%; max-width:980px; } td, th { border-bottom:1px solid var(--line); padding:6px 8px; text-align:left; }
-  td.num { text-align:right; font-variant-numeric:tabular-nums; } .ok { color:var(--ok); } .bad { color:var(--bad); } #log { color:var(--muted); white-space:pre-wrap; }
+  :root { --bg: #fbfaf8; --fg: #1c1b19; --muted: #6b6862; --line: #e4e1db; --ok: #2f7d4f; --bad: #b3402a; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151514; --fg: #ecebe8; --muted: #9a978f; --line: #2d2c2a; --ok: #6cc28f; --bad: #f08a72; }
+  }
+  body { background: var(--bg); color: var(--fg); font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; margin: 24px 16px; }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  #env { color: var(--muted); margin: 0 0 16px; }
+  table { border-collapse: collapse; width: 100%; max-width: 960px; }
+  th { font-weight: 500; color: var(--muted); }
+  td, th { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); }
+  #log { color: var(--muted); white-space: pre-wrap; }
 </style>
 </head>
 <body>
-<h1>ONNX Lab — browser benchmark</h1>
-<p id="env"></p>
-<table id="t"><thead><tr><th>experiment</th><th>size</th><th>backend</th><th>median ms</th><th>correct</th><th>note</th></tr></thead><tbody></tbody></table>
+<h1>onnx-lab browser bench</h1>
+<p id="env">Loading onnxruntime-web…</p>
+<table>
+  <thead><tr><th>case</th><th>size</th><th>backend</th><th>median ms</th><th>answer</th><th>note</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
 <pre id="log"></pre>
 <script>
-const log = (s) => { document.getElementById("log").textContent += s + "\n"; };
-const ARR = { int32: Int32Array, float32: Float32Array, int64: BigInt64Array, bool: Uint8Array, float64: Float64Array };
+// Query parameters: ort=<version>, only=<case,case>, backends=webgpu,wasm, reps=<n>, verbose=1
 const params = new URLSearchParams(location.search);
-const only = params.get("only")?.split(",");
-const backends = (params.get("backends") || "webgpu,wasm").split(",");
-const REPS = +(params.get("reps") || 5);
+const ORT_VERSION = params.get("ort") || "1.30.0";
+const ONLY = params.get("only")?.split(",");
+const BACKENDS = (params.get("backends") || "webgpu,wasm").split(",");
+const REPS = Number(params.get("reps") || 7);
+const ARRAYS = { int32: Int32Array, uint32: Uint32Array, float32: Float32Array, int64: BigInt64Array, bool: Uint8Array };
 
-async function load(name, spec) {
-  const buf = await (await fetch(`${name}/${spec.file}`)).arrayBuffer();
-  return new ort.Tensor(spec.dtype, new ARR[spec.dtype](buf), spec.shape);
+const log = (s) => { document.getElementById("log").textContent += s + "\n"; };
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src; s.onload = resolve; s.onerror = reject;
+    document.head.appendChild(s);
+  });
 }
-function check(out, ref, m) {
-  const a = out.data, b = ref.data;
-  if (m.stochastic) return Math.abs(Number(a[0]) - Number(b[0])) / Math.abs(Number(b[0])) < 0.02;
-  let maxRef = 0, maxErr = 0;
-  for (let i = 0; i < b.length; i++) { const x = Number(a[i]), y = Number(b[i]); maxRef = Math.max(maxRef, Math.abs(y)); maxErr = Math.max(maxErr, Math.abs(x - y) / (m.rel_to_max ? 1 : Math.max(1e-6, Math.abs(y)))); }
-  return m.rel_to_max ? maxErr / maxRef < 2e-3 : maxErr < 1e-3;
+
+async function loadTensor(folder, spec) {
+  const buf = await (await fetch(`${folder}/${spec.file}`)).arrayBuffer();
+  return new ort.Tensor(spec.dtype, new ARRAYS[spec.dtype](buf), spec.shape);
 }
-function row(cells, cls) {
-  const tr = document.createElement("tr");
-  cells.forEach((c, i) => { const td = document.createElement("td"); td.textContent = c; if (i === 3) td.className = "num"; if (i === 4) td.className = cls; tr.appendChild(td); });
-  document.querySelector("#t tbody").appendChild(tr);
-}
-function loadOrt(v) {
-  return new Promise((res, rej) => { const s = document.createElement("script");
-    s.src = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${v}/dist/ort.webgpu.min.js`; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
-}
-(async () => {
-  const ORT_VERSION = params.get("ort") || "1.22.0";
-  await loadOrt(ORT_VERSION);
-  if (params.get("verbose")) {
-    window.__logs = [];
-    for (const k of ["log", "info", "warn", "debug", "error"]) { const orig = console[k].bind(console); console[k] = (...a) => { window.__logs.push(a.map(String).join(" ")); orig(...a); }; }
-    ort.env.logLevel = "verbose"; ort.env.debug = true;
+
+// Same four rules as lab/case.py Tolerance.
+function correct(out, ref, tol) {
+  const a = Array.from(out.data, Number), b = Array.from(ref.data, Number);
+  if (a.length !== b.length) return false;
+  if (tol.kind === "exact") return a.every((x, i) => x === b[i]);
+  if (tol.kind === "scalar_rel") return Math.abs(a[0] - b[0]) / Math.abs(b[0]) < tol.rtol;
+  if (tol.kind === "max_rel") {
+    let err = 0, peak = 0;
+    for (let i = 0; i < b.length; i++) { err = Math.max(err, Math.abs(a[i] - b[i])); peak = Math.max(peak, Math.abs(b[i])); }
+    return err / peak < tol.rtol;
   }
-  document.getElementById("env").textContent = `onnxruntime-web ${ORT_VERSION} · WebGPU: ${"gpu" in navigator ? "available" : "NOT available"} · threads: ${navigator.hardwareConcurrency}`;
+  return a.every((x, i) => Math.abs(x - b[i]) <= tol.atol + tol.rtol * Math.abs(b[i]));  // "close"
+}
+
+function addRow(cells, ok) {
+  const tr = document.createElement("tr");
+  cells.forEach((text, i) => {
+    const td = document.createElement("td");
+    td.textContent = text;
+    if (i === 3) td.className = "num";
+    if (i === 4) td.className = ok ? "ok" : "bad";
+    tr.appendChild(td);
+  });
+  document.getElementById("rows").appendChild(tr);
+}
+
+async function runCase(name, spec, backend, feeds, ref) {
+  const options = { executionProviders: [backend], graphOptimizationLevel: "all" };
+  // In loop mode keep the state on the GPU between calls instead of copying it back every time.
+  if (spec.loop && backend === "webgpu") options.preferredOutputLocation = "gpu-buffer";
+  const session = await ort.InferenceSession.create(`${name}/model.onnx`, options);
+  const once = async () => {
+    let inputs = { ...feeds }, outputs;
+    for (let k = 0; k < (spec.loop ? spec.loop.calls : 1); k++) {
+      outputs = await session.run(inputs);
+      if (spec.loop) {
+        inputs = { ...inputs };
+        for (const [input, index] of Object.entries(spec.loop.feedback)) inputs[input] = outputs[session.outputNames[index]];
+      }
+    }
+    const first = outputs[session.outputNames[0]];
+    return first.location === "gpu-buffer" ? new ort.Tensor(first.type, await first.getData(), first.dims) : first;
+  };
+  const ok = correct(await once(), ref, spec.tolerance);
+  await once();
+  const times = [];
+  for (let r = 0; r < REPS; r++) {
+    const t = performance.now();
+    await once();
+    times.push(performance.now() - t);
+  }
+  await session.release();
+  times.sort((x, y) => x - y);
+  return { ms: times[Math.floor(times.length / 2)], ok };
+}
+
+(async () => {
+  await loadScript(`https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/ort.webgpu.min.js`);
+  if (params.get("verbose")) { ort.env.logLevel = "verbose"; ort.env.debug = true; }
   ort.env.wasm.numThreads = navigator.hardwareConcurrency;
+  const adapter = "gpu" in navigator ? await navigator.gpu.requestAdapter() : null;
+  const gpu = adapter ? (adapter.info?.description || adapter.info?.vendor || "available") : "not available";
+  const env = {
+    ort: ORT_VERSION, webgpu: gpu, threads: navigator.hardwareConcurrency,
+    isolated: self.crossOriginIsolated, userAgent: navigator.userAgent,
+  };
+  document.getElementById("env").textContent =
+    `onnxruntime-web ${ORT_VERSION} · WebGPU: ${gpu} · WASM threads: ${env.threads}` +
+    (env.isolated ? "" : " · not cross-origin isolated, so WASM runs on one thread");
+
   const manifest = await (await fetch("manifest.json")).json();
   const results = [];
-  for (const [name, m] of Object.entries(manifest)) {
-    if (only && !only.includes(name)) continue;
-    const feeds = {}; for (const i of m.inputs) feeds[i.name] = await load(name, i);
-    const ref = await load(name, m.ref);
-    for (const be of backends) {
+  for (const [name, spec] of Object.entries(manifest)) {
+    if (ONLY && !ONLY.includes(name)) continue;
+    const feeds = {};
+    for (const input of spec.inputs) feeds[input.name] = await loadTensor(name, input);
+    const ref = await loadTensor(name, spec.ref);
+    for (const backend of BACKENDS) {
       try {
-        const opts = { executionProviders: [be], graphOptimizationLevel: "all" };
-        if (m.loop && be === "webgpu") opts.preferredOutputLocation = "gpu-buffer";   // keep state on the GPU between calls
-        const sess = await ort.InferenceSession.create(`${name}/model.onnx`, opts);
-        // loop mode: call the model `calls` times, feeding outputs back as inputs (e.g. VM cycles, sim steps)
-        const runOnce = async () => {
-          if (!m.loop) return (await sess.run(feeds))[sess.outputNames[0]];
-          let f = { ...feeds }, o;
-          for (let k = 0; k < m.loop.calls; k++) {
-            o = await sess.run(f);
-            f = { ...f }; for (const [inName, outIdx] of Object.entries(m.loop.feedback)) f[inName] = o[sess.outputNames[outIdx]];
-          }
-          const first = o[sess.outputNames[0]];
-          return first.location === "gpu-buffer" ? new ort.Tensor(first.type, await first.getData(), first.dims) : first;
-        };
-        let out = await runOnce();
-        const ok = check(out, ref, m);
-        await runOnce();
-        const times = [];
-        for (let r = 0; r < REPS; r++) { const t = performance.now(); out = await runOnce(); times.push(performance.now() - t); }
-        times.sort((a, b) => a - b); const ms = times[Math.floor(times.length / 2)];
-        row([name, m.size, be, ms.toFixed(2), ok ? "ok" : "MISMATCH", ""], ok ? "ok" : "bad");
-        results.push({ name, backend: be, ms, ok });
-        await sess.release();
-      } catch (e) { row([name, m.size, be, "—", "error", String(e).slice(0, 140)], "bad"); results.push({ name, backend: be, error: String(e).slice(0, 300) }); }
-      log(`done ${name} ${be}`);
+        const { ms, ok } = await runCase(name, spec, backend, feeds, ref);
+        addRow([name, spec.size, backend, ms.toFixed(2), ok ? "correct" : "wrong", ""], ok);
+        results.push({ case: name, backend, ms, correct: ok });
+      } catch (e) {
+        addRow([name, spec.size, backend, "", "error", String(e).slice(0, 140)], false);
+        results.push({ case: name, backend, error: String(e).slice(0, 300) });
+      }
+      log(`${name} ${backend} done`);
     }
   }
-  window.__results = results; log("ALL DONE"); document.title = "ONNX Lab Bench — done";
-})();
+  window.benchResults = { env, results };
+  log("finished");
+})().catch((e) => { log(String(e)); window.benchResults = { error: String(e) }; });
 </script>
 </body>
 </html>

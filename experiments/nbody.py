@@ -1,42 +1,39 @@
-"""Physics: one O(N^2) gravitational acceleration step for 4096 bodies."""
+"""Physics: one O(N²) gravitational acceleration step."""
 
 import numpy as np
 import torch
 
-from lab.harness import run_experiment
+from lab.case import Case, Tolerance
 
-N, EPS = 4096, 1e-2
+SOFTENING = 1e-2
 
 
-class Accel(torch.nn.Module):
+class Acceleration(torch.nn.Module):
     def forward(self, pos, mass):
         d = pos.unsqueeze(0) - pos.unsqueeze(1)  # [N, N, 3]
-        inv = torch.rsqrt((d * d).sum(-1) + EPS) ** 3  # [N, N]
-        return (d * (inv * mass.unsqueeze(0)).unsqueeze(-1)).sum(1)
+        inv_r3 = torch.rsqrt((d * d).sum(-1) + SOFTENING) ** 3  # [N, N]
+        return (d * (inv_r3 * mass.unsqueeze(0)).unsqueeze(-1)).sum(1)
 
 
-def numpy_accel(pos, mass):
+def numpy_acceleration(pos, mass):
     d = pos[None, :, :] - pos[:, None, :]
-    inv = (np.sum(d * d, -1) + EPS) ** -1.5
-    return np.einsum("ijk,ij->ik", d, inv * mass[None, :])
+    inv_r3 = (np.sum(d * d, -1) + SOFTENING) ** -1.5
+    return np.einsum("ijk,ij->ik", d, inv_r3 * mass[None, :])
 
 
-def main():
+def cases(small: bool = False) -> list[Case]:
+    n = 256 if small else 4096
     rng = np.random.default_rng(0)
-    pos = rng.standard_normal((N, 3)).astype(np.float32)
-    mass = rng.random(N).astype(np.float32)
-    run_experiment(
-        "nbody_step",
-        Accel(),
-        (pos, mass),
-        ["pos", "mass"],
-        baselines={"numpy": numpy_accel},
-        check=lambda out, ref: (
-            np.abs(out - ref).max() / np.abs(ref).max() < 2e-3
-        ),  # rel. to max magnitude
-        size_note=f"{N} bodies",
-    )
-
-
-if __name__ == "__main__":
-    main()
+    pos = rng.standard_normal((n, 3)).astype(np.float32)
+    mass = rng.random(n).astype(np.float32)
+    return [
+        Case(
+            "nbody",
+            Acceleration(),
+            {"pos": pos, "mass": mass},
+            {"numpy": numpy_acceleration},
+            # a few accelerations nearly cancel to zero, so compare against the largest magnitude
+            Tolerance("max_rel", rtol=2e-3),
+            f"{n:,} bodies",
+        )
+    ]

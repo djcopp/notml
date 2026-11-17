@@ -1,19 +1,13 @@
-"""Shared benchmark harness for onnx-lab experiments.
+"""Export a case to ONNX, run it on every runtime available, check each answer and time it.
 
-An experiment provides:
-  * a torch.nn.Module computing the workload (exported to ONNX)
-  * example numpy inputs
-  * baselines: {name: callable(*numpy_inputs) -> numpy output}
-  * an equivalence check
-
-The harness exports the module to ONNX, runs it on each available onnxruntime execution provider,
-times everything with the same method (median of N after warm-up), checks outputs agree with the first
-baseline, and appends a row per runner to build/results.jsonl.
+Every runner is timed the same way (median of N runs after warm-up) and checked against the case's
+reference baseline. One JSON line per runner goes to build/results.jsonl.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import pathlib
 import platform
 import statistics
@@ -26,142 +20,144 @@ import onnx
 import onnxruntime as ort
 import torch
 
+from lab.case import Case
+from lab.graph import IR_VERSION
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 BUILD = ROOT / "build"
-BUILD.mkdir(exist_ok=True)
 RESULTS = BUILD / "results.jsonl"
 
+# The exporter logs a warning per missing torchvision op on every export.
+logging.getLogger("torch.onnx").setLevel(logging.ERROR)
 
-def timeit(
-    fn: Callable[[], object], warmup: int = 2, reps: int = 7, budget_s: float = 20.0
-) -> float:
-    """Median wall time in ms. Stops early if the budget is exhausted (slow pure-Python baselines)."""
+PROVIDERS = ("CPUExecutionProvider", "CoreMLExecutionProvider", "CUDAExecutionProvider")
+
+
+def timeit(fn: Callable[[], object], warmup: int = 2, reps: int = 7, budget_s: float = 20.0) -> float:
+    """Median wall time in ms. Stops early once ``budget_s`` is spent, so slow baselines don't stall a run."""
     for _ in range(warmup):
         fn()
-    times = []
-    t_start = time.perf_counter()
+    times: list[float] = []
+    start = time.perf_counter()
     for _ in range(reps):
         t = time.perf_counter()
         fn()
         times.append((time.perf_counter() - t) * 1000)
-        if time.perf_counter() - t_start > budget_s and len(times) >= 1:
+        if time.perf_counter() - start > budget_s:
             break
     return statistics.median(times)
 
 
-def export(
-    module: torch.nn.Module, inputs: tuple, path: pathlib.Path, input_names: list[str]
-) -> onnx.ModelProto:
-    module.eval()
-    tins = tuple(torch.from_numpy(np.ascontiguousarray(x)) for x in inputs)
+def save_onnx(case: Case, path: pathlib.Path) -> onnx.ModelProto:
+    """Write the case's model to ``path``, exporting it from PyTorch first if needed."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(case.model, onnx.ModelProto):
+        onnx.save(case.model, path)
+        return case.model
+    case.model.eval()
+    args = tuple(torch.from_numpy(np.ascontiguousarray(x)) for x in case.inputs.values())
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        prog = torch.onnx.export(
-            module, tins, dynamo=True, input_names=input_names, verbose=False
-        )
-    prog.optimize()
-    prog.save(str(path))
-    m = onnx.load(str(path))
-    return m
+        program = torch.onnx.export(case.model, args, dynamo=True, input_names=list(case.inputs), verbose=False)
+    program.optimize()
+    program.save(str(path))
+    model = onnx.load(str(path))
+    model.ir_version = min(model.ir_version, IR_VERSION)
+    onnx.save(model, path)
+    return model
 
 
-def ort_runner(path: pathlib.Path, provider: str, input_names: list[str]):
-    opts = {"CoreMLExecutionProvider": {"ModelFormat": "MLProgram"}}.get(provider, {})
+def onnx_runner(case: Case, path: pathlib.Path, provider: str) -> Callable[[], np.ndarray]:
+    options = {"CoreMLExecutionProvider": {"ModelFormat": "MLProgram"}}.get(provider, {})
     so = ort.SessionOptions()
     so.log_severity_level = 3
-    sess = ort.InferenceSession(
-        str(path), so, providers=[(provider, opts), "CPUExecutionProvider"]
-    )
+    providers = [(provider, options)] + (["CPUExecutionProvider"] if provider != "CPUExecutionProvider" else [])
+    session = ort.InferenceSession(str(path), so, providers=providers)
 
-    def run(*xs):
-        return sess.run(None, dict(zip(input_names, xs, strict=True)))[0]
+    def run() -> np.ndarray:
+        feeds = dict(case.inputs)
+        for _ in range(case.loop.calls if case.loop else 1):
+            outs = session.run(None, feeds)
+            if case.loop:
+                feeds.update({name: outs[i] for name, i in case.loop.feedback.items()})
+        return outs[0]
 
     return run
 
 
-def torch_runner(module: torch.nn.Module, device: str):
-    m = module.to(device).eval()
+def torch_runner(case: Case, device: str) -> Callable[[], np.ndarray]:
+    module = case.model.to(device).eval()
+    names = list(case.inputs)
+    tensors = [torch.from_numpy(np.ascontiguousarray(x)).to(device) for x in case.inputs.values()]
 
-    def run(*xs):
+    def run() -> np.ndarray:
+        args = list(tensors)
         with torch.no_grad():
-            out = m(*(torch.from_numpy(np.ascontiguousarray(x)).to(device) for x in xs))
+            for _ in range(case.loop.calls if case.loop else 1):
+                out = module(*args)
+                if case.loop:
+                    for name, i in case.loop.feedback.items():
+                        args[names.index(name)] = out[i]
+            first = out[0] if isinstance(out, tuple) else out
             if device == "mps":
                 torch.mps.synchronize()
-            return out.cpu().numpy()
+            return first.cpu().numpy()
 
     return run
 
 
-def run_experiment(
-    name: str,
-    module: torch.nn.Module,
-    inputs: tuple,
-    input_names: list[str],
-    baselines: dict[str, Callable],
-    check: Callable[[np.ndarray, np.ndarray], bool],
-    size_note: str,
-    torch_devices: tuple[str, ...] = ("mps",),
-    providers: tuple[str, ...] = ("CPUExecutionProvider", "CoreMLExecutionProvider"),
-    reps: int = 7,
-) -> list[dict]:
-    path = BUILD / f"{name}.onnx"
-    t0 = time.perf_counter()
-    model = export(module, inputs, path, input_names)
-    export_s = time.perf_counter() - t0
-    n_nodes = len(model.graph.node)
+def run_case(case: Case, reps: int = 7, torch_devices: tuple[str, ...] = ("mps", "cuda")) -> list[dict]:
+    path = BUILD / f"{case.name}.onnx"
+    model = save_onnx(case, path)
     ops = sorted({n.op_type for n in model.graph.node})
-    print(
-        f"\n=== {name}  [{size_note}]  onnx: {n_nodes} nodes, {path.stat().st_size / 1e3:.0f} kB, "
-        f"export {export_s:.1f}s\n    ops: {', '.join(ops)}"
-    )
+    print(f"\n{case.name}  [{case.size}]  {len(model.graph.node)} nodes, {path.stat().st_size / 1e3:.0f} kB")
+    print(f"  ops: {', '.join(ops)}")
+    if case.known_bad:
+        print(f"  note: {case.known_bad}")
 
-    runners: dict[str, Callable] = dict(baselines)
-    for p in providers:
-        if p in ort.get_available_providers():
-            try:
-                runners[f"onnx:{p.replace('ExecutionProvider', '')}"] = ort_runner(
-                    path, p, input_names
-                )
-            except Exception as e:  # noqa: BLE001
-                print(f"    {p} failed to load: {str(e)[:150]}")
-    for d in torch_devices:
-        if d == "mps" and not torch.backends.mps.is_available():
-            continue
-        runners[f"torch:{d}"] = torch_runner(module, d)
+    inputs = list(case.inputs.values())
+    runners: dict[str, Callable[[], np.ndarray]] = {
+        name: (lambda fn=fn: fn(*inputs)) for name, fn in case.baselines.items()
+    }
+    for provider in PROVIDERS:
+        if provider in ort.get_available_providers():
+            runners[f"onnx:{provider.removesuffix('ExecutionProvider')}"] = onnx_runner(case, path, provider)
+    if isinstance(case.model, torch.nn.Module):
+        for device in torch_devices:
+            if (device == "mps" and torch.backends.mps.is_available()) or (
+                device == "cuda" and torch.cuda.is_available()
+            ):
+                runners[f"torch:{device}"] = torch_runner(case, device)
 
-    ref_name = next(iter(baselines))
-    ref = None
+    reference = None
     rows = []
-    for rname, fn in runners.items():
+    for runner, fn in runners.items():
         try:
-            out = fn(*inputs)
-            ok = True if ref is None else bool(check(np.asarray(out), ref))
-            if ref is None:
-                ref = np.asarray(out)
-            ms = timeit(lambda fn=fn: fn(*inputs), reps=reps)
-        except Exception as e:  # noqa: BLE001
-            print(f"    {rname:22s} ERROR {str(e)[:160]}")
+            out = np.asarray(fn())
+            correct = True if reference is None else case.tolerance.check(out, reference)
+            reference = out if reference is None else reference
+            ms = timeit(fn, reps=reps)
+        except Exception as e:  # noqa: BLE001 - a runtime refusing a model is a result, not a crash
+            print(f"  {runner:24s} error: {str(e)[:160]}")
             continue
         rows.append(
             {
-                "experiment": name,
-                "runner": rname,
+                "case": case.name,
+                "runner": runner,
                 "ms": ms,
-                "correct": ok,
-                "size": size_note,
-                "nodes": n_nodes,
-                "machine": platform.machine(),
+                "correct": correct,
+                "size": case.size,
+                "machine": f"{platform.system()} {platform.machine()}",
+                "onnxruntime": ort.__version__,
                 "ts": time.time(),
             }
         )
-    base_ms = rows[0]["ms"] if rows else None
+
+    base = rows[0]["ms"] if rows else float("nan")
     for r in rows:
-        speed = base_ms / r["ms"] if base_ms else float("nan")
-        print(
-            f"    {r['runner']:22s} {r['ms']:10.2f} ms   {speed:7.2f}x vs {ref_name}   "
-            f"{'ok' if r['correct'] else 'MISMATCH'}"
-        )
+        status = "ok" if r["correct"] else "WRONG"
+        print(f"  {r['runner']:24s} {r['ms']:10.2f} ms  {base / r['ms']:7.2f}x  {status}")
+    BUILD.mkdir(exist_ok=True)
     with RESULTS.open("a") as f:
-        for r in rows:
-            f.write(json.dumps(r) + "\n")
+        f.writelines(json.dumps(r) + "\n" for r in rows)
     return rows

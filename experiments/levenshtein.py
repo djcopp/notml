@@ -1,71 +1,78 @@
-"""Fuzzy matching: Levenshtein distance for 200k string pairs (fixed width 12, NUL-padded)."""
+"""Fuzzy matching: Levenshtein distance for many short string pairs, as a fully unrolled DP table.
+
+This one loses badly (see the README). It's kept because it shows where the approach stops working:
+an unrolled 12x12 dynamic program is ~1,500 tiny nodes, and launch overhead swamps the arithmetic.
+"""
 
 import numpy as np
 import torch
 from rapidfuzz.distance import Levenshtein
 from rapidfuzz.process import cpdist
 
-from lab.harness import run_experiment
+from lab.case import Case, Tolerance
 
-N, L = 200_000, 12
+WIDTH = 12  # strings are NUL-padded to this length
 
 
-class Lev(torch.nn.Module):
-    def forward(self, a, b, la, lb):  # a, b: [N, L] int64; la, lb: [N] lengths
+class EditDistance(torch.nn.Module):
+    def forward(self, a, b, len_a, len_b):  # a, b: [N, WIDTH]; len_a, len_b: [N]
         n = a.shape[0]
-        idx = torch.arange(L + 1, dtype=torch.int64, device=a.device)
-        prev = idx.unsqueeze(0).expand(n, L + 1)  # row 0: 0..L
+        prev = torch.arange(WIDTH + 1, device=a.device).unsqueeze(0).expand(n, WIDTH + 1)
         rows = [prev]
-        for i in range(1, L + 1):
+        for i in range(1, WIDTH + 1):
             cur = [torch.full((n,), i, dtype=torch.int64, device=a.device)]
-            for j in range(1, L + 1):
+            for j in range(1, WIDTH + 1):
                 cost = (a[:, i - 1] != b[:, j - 1]).to(torch.int64)
-                v = torch.minimum(
-                    torch.minimum(prev[:, j] + 1, cur[j - 1] + 1), prev[:, j - 1] + cost
-                )
-                cur.append(v)
+                cur.append(torch.minimum(torch.minimum(prev[:, j] + 1, cur[j - 1] + 1), prev[:, j - 1] + cost))
             prev = torch.stack(cur, dim=1)
             rows.append(prev)
-        table = torch.stack(rows, dim=1)  # [N, L+1, L+1]
-        return table[torch.arange(n, device=a.device), la, lb]
+        table = torch.stack(rows, dim=1)  # [N, WIDTH+1, WIDTH+1]
+        return table[torch.arange(n, device=a.device), len_a, len_b]
 
 
-def main():
-    rng = np.random.default_rng(0)
-    alpha = np.frombuffer(b"abcdefghij", np.uint8)
-    la = rng.integers(4, L + 1, N)
-    lb = np.clip(la + rng.integers(-2, 3, N), 1, L)
-    a = np.zeros((N, L), np.int64)
-    b = np.zeros((N, L), np.int64)
-    sa, sb = [], []
-    for k in range(N):
-        x = rng.choice(alpha, la[k])
-        y = x.copy()[: lb[k]]
-        if len(y) < lb[k]:
-            y = np.concatenate([y, rng.choice(alpha, lb[k] - len(y))])
-        m = rng.random(len(y)) < 0.25
-        y[m] = rng.choice(alpha, m.sum())
-        a[k, : la[k]] = x
-        b[k, : lb[k]] = y
-        sa.append(bytes(x).decode())
-        sb.append(bytes(y).decode())
-    run_experiment(
-        "levenshtein",
-        Lev(),
-        (a, b, la.astype(np.int64), lb.astype(np.int64)),
-        ["a", "b", "la", "lb"],
-        baselines={
-            "rapidfuzz loop": lambda *_: np.array(
-                [Levenshtein.distance(x, y) for x, y in zip(sa, sb)]
-            ),
-            "rapidfuzz.cpdist (C++, all cores)": lambda *_: cpdist(
-                sa, sb, scorer=Levenshtein.distance, workers=-1
-            ),
-        },
-        check=lambda out, ref: np.array_equal(out.ravel(), ref.ravel()),
-        size_note=f"{N:,} pairs, <= {L} chars",
-    )
+def make_pairs(n: int, rng) -> tuple[list[str], list[str]]:
+    """Random strings over a 10-letter alphabet, each paired with a copy that has about 25% of letters changed."""
+    alphabet = np.frombuffer(b"abcdefghij", np.uint8)
+    xs, ys = [], []
+    for _ in range(n):
+        la = rng.integers(4, WIDTH + 1)
+        lb = int(np.clip(la + rng.integers(-2, 3), 1, WIDTH))
+        x = rng.choice(alphabet, la)
+        y = np.concatenate([x[:lb], rng.choice(alphabet, max(0, lb - la))])
+        edit = rng.random(lb) < 0.25
+        y[edit] = rng.choice(alphabet, edit.sum())
+        xs.append(bytes(x).decode())
+        ys.append(bytes(y).decode())
+    return xs, ys
 
 
-if __name__ == "__main__":
-    main()
+def encode(strings: list[str]) -> np.ndarray:
+    out = np.zeros((len(strings), WIDTH), np.int64)
+    for i, s in enumerate(strings):
+        out[i, : len(s)] = np.frombuffer(s.encode(), np.uint8)
+    return out
+
+
+def cases(small: bool = False) -> list[Case]:
+    n = 2_000 if small else 200_000
+    xs, ys = make_pairs(n, np.random.default_rng(0))
+    return [
+        Case(
+            "levenshtein",
+            EditDistance(),
+            {
+                "a": encode(xs),
+                "b": encode(ys),
+                "len_a": np.array([len(s) for s in xs], np.int64),
+                "len_b": np.array([len(s) for s in ys], np.int64),
+            },
+            {
+                "rapidfuzz (all cores)": lambda *_: cpdist(xs, ys, scorer=Levenshtein.distance, workers=-1),
+                "rapidfuzz (loop)": lambda *_: np.array(
+                    [Levenshtein.distance(x, y) for x, y in zip(xs, ys, strict=True)]
+                ),
+            },
+            Tolerance("exact"),
+            f"{n:,} pairs, up to {WIDTH} characters",
+        )
+    ]

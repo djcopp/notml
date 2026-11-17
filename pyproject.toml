@@ -1,6 +1,9 @@
 [project]
 name = "onnx-lab"
 version = "0.1.0"
+description = "Non-ML workloads as portable ONNX graphs, benchmarked natively and in the browser."
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "duckdb>=2.0.0",
@@ -16,5 +19,18 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "playwright>=1.65.2",
+    "pytest>=9.2.0",
     "ruff>=0.17.5",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "NPY"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

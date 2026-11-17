@@ -108,7 +108,7 @@ def build_model(paths=PATHS, steps=STEPS):
         keepdims=0,
     )
     pay = n("Relu", n("Sub", avg, cst("k", K_STRIKE, np.float32)))
-    price = n(
+    n(
         "Mul",
         n("ReduceMean", pay, keepdims=1),
         cst("disc", np.exp(-R * TENOR), np.float32),
@@ -137,7 +137,7 @@ def main():
     path = harness.BUILD / "montecarlo_pcg.onnx"
     onnx.save(m, path)
     # RNG quality sanity check on a small graph's intermediate normals
-    small = build_model(paths=1000, steps=1000)
+    build_model(paths=1000, steps=1000)
     inputs = (np.array([S0], np.float32), np.array([12345], np.int32))
     print(
         f"montecarlo_pcg: {len(m.graph.node)} nodes, ops: {sorted({nd.op_type for nd in m.graph.node})}"
@@ -147,7 +147,7 @@ def main():
         s = ort.InferenceSession(
             str(path), providers=[(prov, opts), "CPUExecutionProvider"]
         )
-        run = lambda: s.run(None, {"s0": inputs[0], "seed": inputs[1]})[0]
+        run = lambda s=s: s.run(None, {"s0": inputs[0], "seed": inputs[1]})[0]
         price = float(run()[0])
         ms = harness.timeit(run)
         print(f"  onnx:{prov[:-17]:8s} price {price:.4f}  {ms:8.1f} ms")
@@ -277,13 +277,13 @@ def rng_quality(model_builder):
         {"s0": np.array([S0], np.float32), "seed": np.array([7], np.int32)},
     )[0].ravel()
     ac = np.corrcoef(z[:-1], z[1:])[0, 1]
-    return dict(
-        mean=float(z.mean()),
-        std=float(z.std()),
-        skew=float(((z - z.mean()) ** 3).mean() / z.std() ** 3),
-        kurt=float(((z - z.mean()) ** 4).mean() / z.std() ** 4),
-        lag1_autocorr=float(ac),
-    )
+    return {
+        "mean": float(z.mean()),
+        "std": float(z.std()),
+        "skew": float(((z - z.mean()) ** 3).mean() / z.std() ** 3),
+        "kurt": float(((z - z.mean()) ** 4).mean() / z.std() ** 4),
+        "lag1_autocorr": float(ac),
+    }
 
 
 def mix_hash_u32(nodes, inits, x, tag, rounds=4):

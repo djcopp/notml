@@ -1,5 +1,5 @@
 [project]
-name = "onnx-lab"
+name = "notml"
 version = "0.1.0"
 description = "Non-ML workloads as portable ONNX graphs, benchmarked natively and in the browser."
 readme = "README.md"

@@ -1,10 +1,11 @@
-# onnx-lab
+# notml
+
+Machine learning tooling, used for programs that are not ML.
 
 ONNX is a file format for neural networks, but its operators add up to a general array language. This
-repo takes eight ordinary programs that aren't machine learning (a SQL aggregate, regex validation, a
-physics step, PageRank, shortest paths, an option pricer, fuzzy string matching and a small virtual
-machine), writes each one as an ONNX graph, and races it against the tool you would normally use. Each
-race runs natively and in a browser tab.
+repo takes eight ordinary programs (a SQL aggregate, regex validation, a physics step, PageRank, shortest
+paths, an option pricer, fuzzy string matching and a small virtual machine), writes each one as an ONNX
+graph, and races it against the tool you would normally use. Each race runs natively and in a browser tab.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/portability-dark.svg">

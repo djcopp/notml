@@ -49,7 +49,7 @@ class Graph:
 
     def model(self) -> onnx.ModelProto:
         graph = helper.make_graph(self.nodes, self.name, self.inputs, self.outputs, initializer=self.initializers)
-        m = helper.make_model(graph, opset_imports=[helper.make_opsetid("", self.opset)], producer_name="onnx-lab")
+        m = helper.make_model(graph, opset_imports=[helper.make_opsetid("", self.opset)], producer_name="notml")
         m.ir_version = IR_VERSION
         onnx.checker.check_model(m, full_check=True)
         return m

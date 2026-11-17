@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ONNX Lab Bench</title>
+<style>
+  :root { --bg:#fff; --fg:#111; --muted:#666; --line:#ddd; --ok:#0a7d32; --bad:#b3261e; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#111; --fg:#eee; --muted:#999; --line:#333; --ok:#5fd38a; --bad:#ff8a80; } }
+  body { background:var(--bg); color:var(--fg); font:14px/1.4 system-ui, sans-serif; margin:16px; }
+  table { border-collapse:collapse; width:100%; max-width:980px; } td, th { border-bottom:1px solid var(--line); padding:6px 8px; text-align:left; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; } .ok { color:var(--ok); } .bad { color:var(--bad); } #log { color:var(--muted); white-space:pre-wrap; }
+</style>
+</head>
+<body>
+<h1>ONNX Lab — browser benchmark</h1>
+<p id="env"></p>
+<table id="t"><thead><tr><th>experiment</th><th>size</th><th>backend</th><th>median ms</th><th>correct</th><th>note</th></tr></thead><tbody></tbody></table>
+<pre id="log"></pre>
+<script>
+const log = (s) => { document.getElementById("log").textContent += s + "\n"; };
+const ARR = { int32: Int32Array, float32: Float32Array, int64: BigInt64Array, bool: Uint8Array, float64: Float64Array };
+const params = new URLSearchParams(location.search);
+const only = params.get("only")?.split(",");
+const backends = (params.get("backends") || "webgpu,wasm").split(",");
+const REPS = +(params.get("reps") || 5);
+
+async function load(name, spec) {
+  const buf = await (await fetch(`${name}/${spec.file}`)).arrayBuffer();
+  return new ort.Tensor(spec.dtype, new ARR[spec.dtype](buf), spec.shape);
+}
+function check(out, ref, m) {
+  const a = out.data, b = ref.data;
+  if (m.stochastic) return Math.abs(Number(a[0]) - Number(b[0])) / Math.abs(Number(b[0])) < 0.02;
+  let maxRef = 0, maxErr = 0;
+  for (let i = 0; i < b.length; i++) { const x = Number(a[i]), y = Number(b[i]); maxRef = Math.max(maxRef, Math.abs(y)); maxErr = Math.max(maxErr, Math.abs(x - y) / (m.rel_to_max ? 1 : Math.max(1e-6, Math.abs(y)))); }
+  return m.rel_to_max ? maxErr / maxRef < 2e-3 : maxErr < 1e-3;
+}
+function row(cells, cls) {
+  const tr = document.createElement("tr");
+  cells.forEach((c, i) => { const td = document.createElement("td"); td.textContent = c; if (i === 3) td.className = "num"; if (i === 4) td.className = cls; tr.appendChild(td); });
+  document.querySelector("#t tbody").appendChild(tr);
+}
+function loadOrt(v) {
+  return new Promise((res, rej) => { const s = document.createElement("script");
+    s.src = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${v}/dist/ort.webgpu.min.js`; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+}
+(async () => {
+  const ORT_VERSION = params.get("ort") || "1.22.0";
+  await loadOrt(ORT_VERSION);
+  if (params.get("verbose")) { ort.env.logLevel = "verbose"; ort.env.debug = true; }
+  document.getElementById("env").textContent = `onnxruntime-web ${ORT_VERSION} · WebGPU: ${"gpu" in navigator ? "available" : "NOT available"} · threads: ${navigator.hardwareConcurrency}`;
+  ort.env.wasm.numThreads = navigator.hardwareConcurrency;
+  const manifest = await (await fetch("manifest.json")).json();
+  const results = [];
+  for (const [name, m] of Object.entries(manifest)) {
+    if (only && !only.includes(name)) continue;
+    const feeds = {}; for (const i of m.inputs) feeds[i.name] = await load(name, i);
+    const ref = await load(name, m.ref);
+    for (const be of backends) {
+      try {
+        const sess = await ort.InferenceSession.create(`${name}/model.onnx`, { executionProviders: [be], graphOptimizationLevel: "all" });
+        let out = (await sess.run(feeds))[sess.outputNames[0]];
+        const ok = check(out, ref, m);
+        for (let w = 0; w < 1; w++) await sess.run(feeds);
+        const times = [];
+        for (let r = 0; r < REPS; r++) { const t = performance.now(); out = (await sess.run(feeds))[sess.outputNames[0]]; times.push(performance.now() - t); }
+        times.sort((a, b) => a - b); const ms = times[Math.floor(times.length / 2)];
+        row([name, m.size, be, ms.toFixed(2), ok ? "ok" : "MISMATCH", ""], ok ? "ok" : "bad");
+        results.push({ name, backend: be, ms, ok });
+        await sess.release();
+      } catch (e) { row([name, m.size, be, "—", "error", String(e).slice(0, 140)], "bad"); results.push({ name, backend: be, error: String(e).slice(0, 300) }); }
+      log(`done ${name} ${be}`);
+    }
+  }
+  window.__results = results; log("ALL DONE"); document.title = "ONNX Lab Bench — done";
+})();
+</script>
+</body>
+</html>

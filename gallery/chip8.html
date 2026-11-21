@@ -140,14 +140,17 @@ const cols = Math.ceil(Math.sqrt(n / 2)) * 1, rows = Math.ceil(n / cols);
 const gap = n === 1 ? 0 : 2;
 canvas.width = cols * (64 + gap) - gap; canvas.height = rows * (32 + gap) - gap;
 const img = ctx.createImageData(canvas.width, canvas.height);
-const LIT = [242, 193, 78], DARK = [12, 12, 12];
-function draw(pixels) {
+// CHIP-8 games erase a sprite and redraw it a few instructions later, so a frame often ends with the sprite
+// missing and it flickers. Like a phosphor screen, a pixel lit in the frame before stays visible, dimmed.
+const LIT = [242, 193, 78], FADING = [150, 118, 46], DARK = [12, 12, 12];
+function draw(pixels, before) {
   const d = img.data, W = canvas.width;
   d.fill(0);
   for (let b = 0; b < n; b++) {
     const ox = (b % cols) * (64 + gap), oy = Math.floor(b / cols) * (32 + gap);
     for (let y = 0; y < 32; y++) for (let x = 0; x < 64; x++) {
-      const c = pixels[b * 2048 + y * 64 + x] ? LIT : DARK, i = ((oy + y) * W + ox + x) * 4;
+      const p = b * 2048 + y * 64 + x;
+      const c = pixels[p] ? LIT : before && before[p] ? FADING : DARK, i = ((oy + y) * W + ox + x) * 4;
       d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2]; d[i + 3] = 255;
     }
   }
@@ -167,7 +170,7 @@ function beep(on) {
 // ---- main loop ----
 const opts = { executionProviders: [engine] };
 const session = await ort.InferenceSession.create("models/chip8.onnx", opts);
-let state = fresh(rom), loaded = null, frames = 0, callMs = 0, last = performance.now();
+let state = fresh(rom), loaded = null, frames = 0, callMs = 0, last = performance.now(), image = null, before = null;
 $("consoles").textContent = n.toLocaleString();
 
 $("rom").onchange = async (e) => {
@@ -190,6 +193,7 @@ async function step() {
     if (old.location === "gpu-buffer") old.dispose();
   }
   state.ctl = out.ctl_out;
+  before = image; image = out.image.data;
   return out;
 }
 
@@ -206,13 +210,13 @@ async function tick(now) {
   if (busy || owed < 1) return;
   busy = true;
   try {
-    if (loaded) { state = fresh(loaded); rom = loaded; loaded = null; }
+    if (loaded) { state = fresh(loaded); rom = loaded; loaded = null; image = null; }
     const start = performance.now();
     let out;
     do { out = await step(); owed -= 1; } while (owed >= 1 && performance.now() - start < 1000 / HZ);
     owed = Math.max(owed, 0);
     if (n === 1) beep(out.ctl_out.data[4] > 0);
-    draw(out.image.data);
+    draw(image, before);
   } finally { busy = false; }
   const t = performance.now();
   if (t - last > 1000) {

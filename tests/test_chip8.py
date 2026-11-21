@@ -94,6 +94,23 @@ def test_wait_for_key(session):
     assert refs[0].v[3] == 9
 
 
+def test_catch_every_block_can_be_caught():
+    """A player that follows the block must never miss, at the page's 12 instructions a frame."""
+    from notml.chip8 import program
+
+    c = reference.Chip8(program("catch"), seed=7)
+    keys = np.zeros(16, np.int64)
+    scores = []
+    for _ in range(60 * 30):  # 30 seconds at 60 frames a second
+        paddle, block = int(c.v[0xA]), int(c.v[0xC])
+        target = min(max(block - 3, 0), 56)  # caught when 0 <= block - paddle <= 7
+        keys[4], keys[6] = int(paddle > target + 1), int(paddle < target - 1)
+        c.frame(keys, 12)
+        scores.append(int(c.v[0xE]))
+    assert all(b >= a for a, b in zip(scores, scores[1:], strict=False)), "the score was reset by a miss"
+    assert scores[-1] >= 10
+
+
 def test_catch_game_plays_the_same(session):
     from notml.chip8 import program
 

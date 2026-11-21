@@ -1,6 +1,8 @@
 ; Catch: move the paddle with keys 4 and 6 to catch the falling blocks.
-; A catch adds a point; a miss resets the score. One game tick every two frames.
-;   VA, VB  paddle x, y        VC, VD  block x, y        VE  score
+; A catch adds a point; a miss resets the score. One game tick every two frames (30 a second at 60 Hz).
+; The paddle moves 2 pixels a tick and the block falls a row every other tick, so it takes about two
+; seconds to fall and the paddle can cross the whole screen in that time: every block can be caught.
+;   VA, VB  paddle x, y        VC, VD  block x, y        VE  score        V9  ticks since the block fell
 ;   V0-V4   scratch (score drawing), V5-V8 scratch
 
         LD VA, 28
@@ -32,6 +34,11 @@ tick:   LD V5, DT               ; wait for the delay timer
         LD I, paddle
         DRW VA, VB, 1
 
+        ADD V9, 1               ; the block only falls every other tick
+        SE V9, 2
+        JP tick
+        LD V9, 0
+
         LD I, block             ; move the block down a row
         DRW VC, VD, 2
         ADD VD, 1
@@ -59,12 +66,12 @@ miss:   CALL score
 fall:   DRW VC, VD, 2
         JP tick
 
-left:   SE VA, 0
-        ADD VA, 0xFF            ; minus one
+left:   SE VA, 0                ; the paddle starts at an even x and moves 2, so it stops exactly at 0 and 56
+        ADD VA, 0xFE            ; minus two
         RET
 
 right:  SE VA, 56
-        ADD VA, 1
+        ADD VA, 2
         RET
 
 score:  LD I, digits            ; draw the last two digits of VE at the top left (XOR, so twice erases)

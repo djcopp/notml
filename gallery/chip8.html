@@ -109,9 +109,17 @@ function fresh(rom) {
 // ---- keyboard (one console) and random players (many) ----
 const KEYMAP = { "1": 1, "2": 2, "3": 3, "4": 12, q: 4, w: 5, e: 6, r: 13, a: 7, s: 8, d: 9, f: 14, z: 10, x: 0, c: 11, v: 15,
                  arrowleft: 4, arrowright: 6, arrowup: 5, arrowdown: 8 };
-const keys = new Int32Array(n * 16);
+// `tapped` remembers a key that went down since the last frame, so a tap shorter than a frame still counts
+const keys = new Int32Array(n * 16), tapped = new Int32Array(n * 16), held = new Int32Array(n * 16);
 if (n === 1) {
-  const set = (e, down) => { const k = KEYMAP[e.key.toLowerCase()]; if (k !== undefined) { keys[k] = down ? 1 : 0; e.preventDefault(); } };
+  const set = (e, down) => {
+    const k = KEYMAP[e.key.toLowerCase()];
+    if (k === undefined || e.metaKey || e.ctrlKey) return;
+    keys[k] = down ? 1 : 0;
+    if (down) tapped[k] = 1;
+    e.preventDefault();
+  };
+  addEventListener("blur", () => keys.fill(0));
   addEventListener("keydown", (e) => set(e, true));
   addEventListener("keyup", (e) => set(e, false));
 }
@@ -159,43 +167,64 @@ function beep(on) {
 // ---- main loop ----
 const opts = { executionProviders: [engine] };
 const session = await ort.InferenceSession.create("models/chip8.onnx", opts);
-let state = fresh(rom), frames = 0, calls = 0, callMs = 0, last = performance.now(), token = 0;
+let state = fresh(rom), loaded = null, frames = 0, callMs = 0, last = performance.now();
 $("consoles").textContent = n.toLocaleString();
 
 $("rom").onchange = async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  rom = new Uint8Array(await file.arrayBuffer()).slice(0, 4096 - 0x200);
-  state = fresh(rom);
+  loaded = new Uint8Array(await file.arrayBuffer()).slice(0, 4096 - 0x200);  // swapped in between frames
 };
 
-async function frame() {
-  const mine = ++token;
+// one CHIP-8 frame for every console
+async function step() {
   if (n > 1) randomPlayers();
+  for (let k = 0; k < keys.length; k++) held[k] = keys[k] | tapped[k];
+  tapped.fill(0);
   const t0 = performance.now();
-  const out = await session.run({ ...state, keys: new ort.Tensor("int32", keys, [n, 16]) });
-  callMs += performance.now() - t0; calls += 1;
+  const out = await session.run({ ...state, keys: new ort.Tensor("int32", held, [n, 16]) });
+  callMs += performance.now() - t0; frames += 1;
   for (const name of ["mem", "v", "stack", "screen"]) {
     const old = state[name];
     state[name] = out[`${name}_out`];
     if (old.location === "gpu-buffer") old.dispose();
   }
   state.ctl = out.ctl_out;
-  if (n === 1) beep(out.ctl_out.data[4] > 0);
-  draw(out.image.data);
-  frames += 1;
-  const now = performance.now();
-  if (now - last > 1000) {
-    const sec = (now - last) / 1000;
+  return out;
+}
+
+// requestAnimationFrame only wakes the loop up. Each model call is one CHIP-8 frame (CYCLES instructions,
+// then one tick of the delay and sound timers). The clock owes a frame every 1/60 s and each wake-up pays
+// what is owed, so a 120 Hz screen gets the same game speed as a 60 Hz one.
+// If the model can't keep up (many consoles), it runs as fast as it can rather than piling up a backlog.
+const HZ = 60, MAX_OWED = 4;
+let owed = 0, prev = performance.now(), busy = false;
+async function tick(now) {
+  requestAnimationFrame(tick);
+  owed = Math.min(owed + Math.min(Math.max(now - prev, 0), 250) / 1000 * HZ, MAX_OWED);
+  prev = now;
+  if (busy || owed < 1) return;
+  busy = true;
+  try {
+    if (loaded) { state = fresh(loaded); rom = loaded; loaded = null; }
+    const start = performance.now();
+    let out;
+    do { out = await step(); owed -= 1; } while (owed >= 1 && performance.now() - start < 1000 / HZ);
+    owed = Math.max(owed, 0);
+    if (n === 1) beep(out.ctl_out.data[4] > 0);
+    draw(out.image.data);
+  } finally { busy = false; }
+  const t = performance.now();
+  if (t - last > 1000) {
+    const sec = (t - last) / 1000;
     $("fps").textContent = (frames / sec).toFixed(0);
     $("ips").textContent = Math.round(frames * CYCLES * n / sec).toLocaleString();
-    $("call").textContent = `${(callMs / calls).toFixed(1)} ms`;
-    window.benchLast = { n, engine, fps: frames / sec, ips: frames * CYCLES * n / sec, call_ms: callMs / calls };
-    frames = 0; calls = 0; callMs = 0; last = now;
+    $("call").textContent = `${(callMs / frames).toFixed(1)} ms`;
+    window.benchLast = { n, engine, fps: frames / sec, ips: frames * CYCLES * n / sec, call_ms: callMs / frames };
+    frames = 0; callMs = 0; last = t;
   }
-  if (mine === token) requestAnimationFrame(frame);
 }
-requestAnimationFrame(frame);
+requestAnimationFrame(tick);
 </script>
 </body>
 </html>
